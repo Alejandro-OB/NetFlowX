@@ -84,3 +84,4 @@ def generar_e_insertar_reglas():
 # Ejecutar la función
 if __name__ == "__main__":
     generar_e_insertar_reglas()
+#hola
