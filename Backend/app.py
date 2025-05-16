@@ -8,11 +8,14 @@ from routes import config, stats
 from routes.reglas import reglas_bp
 # Configuración desde archivo externo
 from config import Config
-
+from routes.config import video_bp 
 import psycopg2
 import psycopg2.extras
 import json
 from config import Config
+# Añade esto cerca de los otros imports
+from routes.servers import servers_bp
+
 
 def get_db():
     if 'db' not in g:
@@ -22,10 +25,11 @@ def get_db():
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
-
+    
 
     # CORS: permitir sólo orígenes confiables
     CORS(app, resources={r"/*": {"origins": "*"}})
+
 
 
 
@@ -34,6 +38,8 @@ def create_app():
     app.register_blueprint(config.bp, url_prefix='/config')
     app.register_blueprint(stats.bp, url_prefix='/stats')
     app.register_blueprint(reglas_bp, url_prefix='/reglas')
+    app.register_blueprint(video_bp, url_prefix='/config/video')
+    app.register_blueprint(servers_bp, url_prefix='/servers')
     
 
 

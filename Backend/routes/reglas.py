@@ -299,3 +299,4 @@ def obtener_regla_para_modificar(rule_id):
 
     except Exception as e:
         return jsonify({'error': f'Error fetching rule: {str(e)}'}), 500
+

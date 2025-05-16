@@ -153,85 +153,11 @@ document.getElementById('menu-btn').addEventListener('click', () => {
     cargarTopologia();
   }
   
-  async function cargarServidores() {
-    const res = await fetch('http://localhost:5000/config/servidores');
-    const data = await res.json();
-    const contenedor = document.getElementById('tabla-servidores');
-    contenedor.innerHTML = '';
-  
-    data.forEach(servidor => {
-      const estado = servidor.activo ? 'Activo' : 'Inactivo';
-      const color = servidor.activo ? 'green' : 'red';
-      const nuevoEstado = !servidor.activo;
-  
-      const div = document.createElement('div');
-      div.innerHTML = `
-        <span class="font-medium">${servidor.nombre}</span> 
-        <span class="text-${color}-600">(${estado})</span>
-        <button onclick="cambiarEstadoServidor('${servidor.nombre}', ${nuevoEstado})"
-                class="ml-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
-          ${servidor.activo ? 'Desactivar' : 'Activar'}
-        </button>
-      `;
-      contenedor.appendChild(div);
-    });
-  }
-  
-  async function cambiarEstadoServidor(nombre, nuevoEstado) {
-    const res = await fetch(`http://localhost:5000/config/servidores/${nombre}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ activo: nuevoEstado })
-    });
-  
-    const data = await res.json();
-    alert(data.message);
-    cargarServidores(); 
-  }
-  
-  async function cargarHostsNoServidores() {
-    const res = await fetch("http://localhost:5000/config/hosts/no-servidores");
-    const data = await res.json();
-    const select = document.getElementById("select-nombres-hosts");
-    select.innerHTML = '';
-  
-    data.sort((a, b) => {
-      const [ha] = a.nombre.split('_').map(v => parseInt(v.replace('h', '')));
-      const [hb] = b.nombre.split('_').map(v => parseInt(v.replace('h', '')));
-      return ha - hb;
-    });
-  
-    data.forEach(host => {
-      const option = document.createElement("option");
-      option.value = host.nombre;
-      option.textContent = host.nombre;
-      select.appendChild(option);
-    });
-  }
-  
-  async function asignarServidores() {
-    const select = document.getElementById("select-nombres-hosts");
-    const nombres = Array.from(select.selectedOptions).map(opt => opt.value);
-  
-    if (nombres.length === 0) return alert("Selecciona al menos un host");
-  
-    const res = await fetch("http://localhost:5000/config/hosts/asignar-servidor", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nombres })
-    });
-  
-    const data = await res.json();
-    alert(data.message);
-    cargarServidores(); 
-    cargarHostsNoServidores(); 
-  }
   
   window.addEventListener('DOMContentLoaded', () => {
     cargarEstadisticas();
     cargarLogs();
     cargarTopologia();
-    cargarServidores();
-    cargarHostsNoServidores();
   });
+  
   
