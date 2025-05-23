@@ -157,56 +157,52 @@ class SDNDijkstraRouter(app_manager.RyuApp):
         origen_sw = origen_sw[0]
 
         if origen_sw == destino_sw:
+            self.logger.info(f"{origen_sw} y {destino_sw} están en el mismo switch {sw_nombre}. Instalando reenvíos locales.")
 
-            # Ambos hosts están en el mismo switch
-            self.logger.info(f"{origen_sw} y {destino_sw} están en el mismo switch {sw_nombre}. Instalando reenvío local.")
+            for ip_target, port_target in [(dst_ip, self.obtener_puerto_dinamico(sw_nombre, dst_ip)),
+                                        (src_ip, self.obtener_puerto_dinamico(sw_nombre, src_ip))]:
+                if port_target is None:
+                    self.logger.warning(f"[LOCAL] No se encontró puerto para {ip_target} en {sw_nombre}")
+                    continue
 
-            # Obtener el puerto hacia el host destino desde la tabla 'puertos'
-            puerto_salida = self.obtener_puerto_dinamico(sw_nombre, dst_ip)
+                match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=ip_target)
+                actions = [parser.OFPActionOutput(int(port_target))]
+                inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+                mod = parser.OFPFlowMod(
+                    datapath=datapath,
+                    priority=100,
+                    match=match,
+                    instructions=inst
+                )
+                datapath.send_msg(mod)
+                self.logger.info(f"[LOCAL] Regla instalada para {ip_target} → puerto {port_target}")
 
-
-            if puerto_salida is None:
-                self.logger.warning(f"No se encontró puerto de salida local para {dst_ip} en {sw_nombre}")
-                return
-
-            eth_type = eth.ethertype
-            if eth_type == 0x0800:  # IPv4
-                match = parser.OFPMatch(eth_type=eth_type, ipv4_dst=dst_ip)
-            elif eth_type == 0x0806:  # ARP
-                match = parser.OFPMatch(eth_type=eth_type)
-            else:
-                self.logger.warning(f"[DROP] Paquete con eth_type desconocido: {eth_type}")
-                return
-
-            actions = [parser.OFPActionOutput(int(puerto_salida))]
-            inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
-            mod = parser.OFPFlowMod(
-                datapath=datapath,
-                priority=100,
-                match=match,
-                instructions=inst
-            )
-            datapath.send_msg(mod)
-            #self.guardar_regla_en_postgresql(dpid_actual, 100, match, actions)
-
-            # reenviar el primer paquete
+            # Reenviar primer paquete solo hacia el destino
             out = parser.OFPPacketOut(
                 datapath=datapath,
                 buffer_id=msg.buffer_id,
                 in_port=in_port,
-                actions=actions,
+                actions=[parser.OFPActionOutput(int(self.obtener_puerto_dinamico(sw_nombre, dst_ip)))],
                 data=msg.data if msg.buffer_id == ofproto.OFP_NO_BUFFER else None
             )
             datapath.send_msg(out)
-            #self.guardar_regla_en_postgresql(dpid_actual, 100, match, actions)
-            self.logger.info(f"[REPLY] Paquete reenviado localmente desde {src_ip} hacia {dst_ip} por el puerto {puerto_salida}")
+            self.logger.info(f"[REPLY] Paquete reenviado localmente desde {src_ip} hacia {dst_ip}")
             return
-    
+
         grafo = self.construir_grafo()
 
         try:
             self.logger.info(f"{src_ip} ({origen_sw}) quiere comunicarse con {dst_ip} ({destino_sw}). Calculando ruta con Dijkstra...")
             ruta_ida = nx.dijkstra_path(grafo, sw_nombre, destino_sw, weight='weight')
+            # Paso final: último switch hacia host destino
+            ultimo_switch = ruta_ida[-1]
+            puerto_host = self.obtener_puerto_dinamico(ultimo_switch, dst_ip)
+            if puerto_host:
+                dpid_final = self.obtener_dpid(ultimo_switch)
+                datapath_final = self.datapaths.get(dpid_final)
+                if datapath_final:
+                    self.instalar_regla_host_final(datapath_final, dst_ip, puerto_host)
+ 
             if len(ruta_ida) < 2:
                 self.logger.info(f"[ENTREGA DIRECTA] El switch {sw_nombre} es el destino final para {dst_ip}. Instalando regla hacia el host.")
                 
@@ -252,14 +248,24 @@ class SDNDijkstraRouter(app_manager.RyuApp):
 
 
         for ruta, ip_objetivo, direccion in [(ruta_ida, dst_ip, "IDA"), (ruta_retorno, src_ip, "RETORNO")]:
+            self.logger.info(f"[{direccion}] Instalando reglas para destino {ip_objetivo}")
             for i in range(len(ruta) - 1):
                 actual = ruta[i]
                 siguiente = ruta[i + 1]
                 dpid_actual = self.obtener_dpid(actual)
                 datapath_actual = self.datapaths.get(dpid_actual)
 
+                if not dpid_actual:
+                    self.logger.warning(f"[{direccion}] No se pudo obtener el DPID de {actual}")
+                    continue
+
+                if not datapath_actual:
+                    self.logger.warning(f"[{direccion}] Switch {actual} (DPID {dpid_actual}) no está en self.datapaths")
+                    continue
+
                 puerto_salida = self.obtener_puerto_dinamico(actual, siguiente)
-                if not datapath_actual or puerto_salida is None:
+                if puerto_salida is None:
+                    self.logger.warning(f"[{direccion}] No se encontró puerto entre {actual} → {siguiente}")
                     continue
 
                 if eth.ethertype == 0x0800:
@@ -267,7 +273,7 @@ class SDNDijkstraRouter(app_manager.RyuApp):
                 elif eth.ethertype == 0x0806:
                     match = parser.OFPMatch(eth_type=0x0806)
                 else:
-                    self.logger.warning(f"[DROP] Paquete desconocido con eth_type {eth.ethertype}")
+                    self.logger.warning(f"[{direccion}] Tipo de paquete desconocido: {eth.ethertype}")
                     continue
 
                 actions = [parser.OFPActionOutput(int(puerto_salida))]
@@ -279,21 +285,22 @@ class SDNDijkstraRouter(app_manager.RyuApp):
                     instructions=inst
                 )
                 datapath_actual.send_msg(mod)
-                #self.guardar_regla_en_postgresql(dpid_actual, 100, match, actions)
+                self.logger.info(f"[{direccion}] Instalando regla en {actual} (DPID {dpid_actual}) → {siguiente} por puerto {puerto_salida} para {ip_objetivo}")
 
-        puerto_salida = self.obtener_puerto(sw_nombre, ruta_ida[1])
-        if puerto_salida is None:
-            return
-        actions = [parser.OFPActionOutput(int(puerto_salida))]
-        out = parser.OFPPacketOut(
-            datapath=datapath,
-            buffer_id=msg.buffer_id,
-            in_port=in_port,
-            actions=actions,
-            data=msg.data if msg.buffer_id == ofproto.OFP_NO_BUFFER else None
-        )
-        datapath.send_msg(out)
-        self.logger.info(f"[REPLY] Primer paquete enviado desde {src_ip} hacia {dst_ip} a través de {sw_nombre} por el puerto {puerto_salida}")
+        # 🚨 Instala la regla final de retorno hacia el host origen
+        ultimo_switch_ret = ruta_retorno[-1]
+        puerto_ret_host = self.obtener_puerto_dinamico(ultimo_switch_ret, src_ip)
+        if puerto_ret_host:
+            dpid_ret = self.obtener_dpid(ultimo_switch_ret)
+            datapath_ret = self.datapaths.get(dpid_ret)
+            if datapath_ret:
+                self.instalar_regla_host_final(datapath_ret, src_ip, puerto_ret_host)
+            else:
+                self.logger.warning(f"[FINAL RETORNO] Datapath no encontrado para {ultimo_switch_ret}")
+        else:
+            self.logger.warning(f"[FINAL RETORNO] No se encontró puerto de salida desde {ultimo_switch_ret} hacia {src_ip}")
+
+
 
     
     def obtener_reglas_desde_db(self):
@@ -856,3 +863,20 @@ class SDNDijkstraRouter(app_manager.RyuApp):
             if conn:
                 conn.close()
 
+    def instalar_regla_host_final(self, datapath, ip_objetivo, puerto_salida):
+        """
+        Instala una regla para entregar paquetes al host final conectado al último switch.
+        """
+        parser = datapath.ofproto_parser
+        ofproto = datapath.ofproto
+        match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=ip_objetivo)
+        actions = [parser.OFPActionOutput(int(puerto_salida))]
+        inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+        mod = parser.OFPFlowMod(
+            datapath=datapath,
+            priority=100,
+            match=match,
+            instructions=inst
+        )
+        datapath.send_msg(mod)
+        self.logger.info(f"[HOST FINAL] Regla instalada en {datapath.id} para {ip_objetivo} → puerto {puerto_salida}")
