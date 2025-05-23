@@ -8,7 +8,7 @@ topology_bp = Blueprint('topology', __name__)
 def get_db_conn():
     return psycopg2.connect(Config.get_db_uri())
 
-@topology_bp.route('', methods=['GET'])
+@topology_bp.route('/', methods=['GET'])
 def get_topology():
     """
     Devuelve la lista de switches y enlaces.
