@@ -55,7 +55,7 @@
         <div class="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-6 hover:shadow-xl transition-all">
           <h3 class="text-xl font-semibold mb-2 text-blue-600">Indicadores Clave</h3>
           <p class="text-gray-700">Total de peticiones procesadas: <span class="font-bold text-blue-600">15,742</span></p>
-          <div class="h-32 bg-gray-100 rounded-lg flex items-center justify-center text-gray-700">[Gráfico Distribución de Carga]</div>
+          <div class="h-32 bg-gray-100 rounded-lg mb-4 flex items-center justify-center text-gray-700">[Gráfico Distribución de Carga]</div>
         </div>
         <div class="bg-white rounded-2xl shadow p-6">
           <h3 class="text-xl font-semibold mb-2 text-blue-600">Alertas Recientes</h3>
@@ -197,10 +197,20 @@
               </div>
               <div>
                 <label class="block text-sm font-medium mb-1">Ruta del Video</label>
-                <input type="text" id="video-path" placeholder="/videos/ejemplo.mp4" 
+                <input type="text" id="video-path" placeholder="/home/ortega/mininet/sample.mp4" value="/home/ortega/mininet/sample.mp4"
                        class="border border-gray-300 rounded p-2 w-full">
               </div>
-              <button onclick="startVideoServer()" 
+              <div>
+                <label class="block text-sm font-medium mb-1">IP de Destino (Cliente)</label>
+                <input type="text" id="ip-destino" placeholder="Ej: 10.0.0.2" value="10.0.0.2"
+                       class="border border-gray-300 rounded p-2 w-full">
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">Puerto UDP</label>
+                <input type="number" id="puerto-udp" placeholder="Ej: 5004" value="5004"
+                       class="border border-gray-300 rounded p-2 w-full">
+              </div>
+              <button id="start-video-server-btn" onclick="startVideoServer()" 
                       class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded shadow-md transition">
                 Iniciar Servidor
               </button>
@@ -219,7 +229,7 @@
                     <th class="p-2 text-left">Acciones</th>
                   </tr>
                 </thead>
-                <tbody id="active-servers-table">
+                <tbody id="active-servers-table-body">
                   </tbody>
               </table>
             </div>
@@ -246,7 +256,7 @@
       <div class="grid lg:grid-cols-2 gap-6">
         <div class="bg-white rounded-2xl shadow p-6">
           <h3 class="text-xl font-semibold mb-4 text-blue-600">Estadísticas de Uso</h3>
-          <div class="h-48 bg-gray-100 rounded-lg mb-4 flex items-center justify-center text-gray-700">[Gráfica de Peticiones]</div>
+          <div class="h-48 bg-gray-100 rounded-lg mb-4 flex items-center justify-center text-gray-700">[Gráfico Distribución de Carga]</div>
           <p class="text-gray-700 mb-2">Tasa de peticiones por minuto: <span class="font-bold text-blue-600">120</span></p>
           <div class="overflow-auto">
             <table class="w-full text-left border-collapse text-sm">
