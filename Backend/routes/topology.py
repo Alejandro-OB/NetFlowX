@@ -1,99 +1,131 @@
+# routes/topology.py
 from flask import Blueprint, jsonify, request
-from config import get_db_connection
+import psycopg2
+from config import Config
 
 topology_bp = Blueprint('topology', __name__)
 
-@topology_bp.route('/', methods=['GET'])
-def obtener_topologia():
-    conn = get_db_connection()
+def get_db_conn():
+    return psycopg2.connect(Config.get_db_uri())
+
+@topology_bp.route('', methods=['GET'])
+def get_topology():
+    """
+    Devuelve la lista de switches y enlaces.
+    """
+    conn = get_db_conn()
     cur = conn.cursor()
-
-    # Obtener switches con coordenadas
-    cur.execute("""
-        SELECT id_switch, nombre, longitud, latitud
-        FROM switches
-        WHERE longitud IS NOT NULL AND latitud IS NOT NULL
-    """)
+    # Switches
+    cur.execute("SELECT id_switch, nombre, latitud, longitud FROM switches;")
     switches = [
-        {
-            "id": row[0],
-            "nombre": row[1],
-            "longitud": row[2],
-            "latitud": row[3]
-        }
-        for row in cur.fetchall()
+        {"id": r[0], "nombre": r[1], "latitud": float(r[2]), "longitud": float(r[3])}
+        for r in cur.fetchall()
     ]
-
-    # Obtener enlaces con nombres de switches
+    # Enlaces
     cur.execute("""
-        SELECT s1.nombre, s2.nombre, e.ancho_banda
+        SELECT s1.nombre AS origen, s2.nombre AS destino, e.ancho_banda
         FROM enlaces e
         JOIN switches s1 ON e.id_origen = s1.id_switch
-        JOIN switches s2 ON e.id_destino = s2.id_switch
+        JOIN switches s2 ON e.id_destino = s2.id_switch;
     """)
     enlaces = [
-        {
-            "origen": row[0],
-            "destino": row[1],
-            "ancho_banda": row[2]
-        }
-        for row in cur.fetchall()
+        {"origen": r[0], "destino": r[1], "ancho_banda": r[2]}
+        for r in cur.fetchall()
     ]
-
     cur.close()
     conn.close()
-
-    return jsonify({
-        "switches": switches,
-        "enlaces": enlaces
-    })
+    return jsonify({"switches": switches, "enlaces": enlaces})
 
 @topology_bp.route('/enlace', methods=['POST'])
-def crear_enlace():
-    data = request.get_json()
-    id_origen = data.get("id_origen")
-    id_destino = data.get("id_destino")
-    ancho_banda = data.get("ancho_banda")
-
-    if not id_origen or not id_destino or not ancho_banda:
-        return jsonify({"error": "Datos incompletos"}), 400
-
+def create_enlace():
+    """
+    Crea un nuevo enlace. JSON esperado: { id_origen, id_destino, ancho_banda }.
+    """
+    data = request.get_json() or {}
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO enlaces (id_origen, id_destino, ancho_banda) VALUES (%s, %s, %s)",
-            (id_origen, id_destino, ancho_banda)
-        )
-        conn.commit()
+        io, id_, bw = int(data.get('id_origen')), int(data.get('id_destino')), int(data.get('ancho_banda'))
+        if io <= 0 or id_ <= 0 or bw <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Parámetros inválidos"}), 400
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO enlaces (id_origen, id_destino, ancho_banda)
+        VALUES (%s, %s, %s)
+    """, (io, id_, bw))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"message": f"Enlace {io}→{id_} creado con {bw} Mbps"}), 201
+
+@topology_bp.route('/enlace', methods=['PUT'])
+def update_enlace():
+    """
+    Actualiza el ancho de banda de un enlace existente.
+    JSON esperado: { id_origen, id_destino, ancho_banda }.
+    """
+    data = request.get_json() or {}
+    try:
+        io, id_, bw = int(data.get('id_origen')), int(data.get('id_destino')), int(data.get('ancho_banda'))
+        if io <= 0 or id_ <= 0 or bw <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Parámetros inválidos"}), 400
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+    # Intentamos primero como dirección directa, luego invertida
+    cur.execute("""
+        UPDATE enlaces
+        SET ancho_banda = %s
+        WHERE (id_origen, id_destino) = (%s, %s)
+           OR (id_origen, id_destino) = (%s, %s);
+    """, (bw, io, id_, id_, io))
+    if cur.rowcount == 0:
+        conn.rollback()
         cur.close()
         conn.close()
-        return jsonify({"message": "Enlace creado correctamente"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    
+        return jsonify({"error": "Enlace no encontrado"}), 404
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"message": f"Enlace {io}↔{id_} actualizado a {bw} Mbps"}), 200
+
 @topology_bp.route('/enlace', methods=['DELETE'])
-def eliminar_enlace():
-    data = request.get_json()
-    origen = data.get("origen")
-    destino = data.get("destino")
+def delete_enlace():
+    """
+    Elimina un enlace. JSON esperado: { origen, destino } (nombres de switch).
+    """
+    data = request.get_json() or {}
+    ori_name, dst_name = data.get('origen'), data.get('destino')
+    if not ori_name or not dst_name:
+        return jsonify({"error": "Parámetros inválidos"}), 400
 
-    if not origen or not destino:
-        return jsonify({"error": "Faltan datos"}), 400
+    conn = get_db_conn()
+    cur = conn.cursor()
+    # Tomamos id_switch de cada nombre
+    cur.execute("SELECT id_switch FROM switches WHERE nombre=%s", (ori_name,))
+    r1 = cur.fetchone()
+    cur.execute("SELECT id_switch FROM switches WHERE nombre=%s", (dst_name,))
+    r2 = cur.fetchone()
+    if not r1 or not r2:
+        return jsonify({"error": "Switch no encontrado"}), 404
+    io, id_ = r1[0], r2[0]
 
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            DELETE FROM enlaces
-            WHERE (id_origen = (SELECT id_switch FROM switches WHERE nombre = %s)
-              AND id_destino = (SELECT id_switch FROM switches WHERE nombre = %s))
-               OR (id_origen = (SELECT id_switch FROM switches WHERE nombre = %s)
-              AND id_destino = (SELECT id_switch FROM switches WHERE nombre = %s))
-        """, (origen, destino, destino, origen))
-        conn.commit()
+    cur.execute("""
+        DELETE FROM enlaces
+        WHERE (id_origen, id_destino) = (%s, %s)
+           OR (id_origen, id_destino) = (%s, %s);
+    """, (io, id_, id_, io))
+    if cur.rowcount == 0:
+        conn.rollback()
         cur.close()
         conn.close()
-        return jsonify({"message": "Enlace eliminado"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Enlace no encontrado"}), 404
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"message": f"Enlace {ori_name}↔{dst_name} eliminado"}), 200
+

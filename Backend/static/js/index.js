@@ -396,6 +396,53 @@ async function updateDashboardAlgorithms() {
   }
 }
 
+/**
+ * Pobla todos los selects: crear y editar.
+ */
+function poblarSelects(lista) {
+  const ids = ['select-origen','select-destino','edit-select-origen','edit-select-destino'];
+  ids.forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = `<option disabled selected>${ id.includes('edit') ? 'Switch origen' : 'Switch origen' }</option>`;
+    lista.forEach(sw => {
+      const opt = document.createElement('option');
+      opt.value = sw.id;
+      opt.textContent = sw.nombre;
+      sel.appendChild(opt.cloneNode(true));
+    });
+  });
+}
+
+/**
+ * Actualiza un enlace existente.
+ */
+async function actualizarEnlace() {
+  const origen = document.getElementById('edit-select-origen').value;
+  const destino = document.getElementById('edit-select-destino').value;
+  const bw = document.getElementById('edit-input-bw').value;
+  if (!origen || !destino || !bw) {
+    return showMessageModal('Completa todos los campos para actualizar');
+  }
+  try {
+    const res = await fetch('http://localhost:5000/topology/enlace', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id_origen: parseInt(origen),
+        id_destino: parseInt(destino),
+        ancho_banda: parseInt(bw)
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error desconocido');
+    showMessageModal(data.message);
+    cargarTopologia();
+  } catch (err) {
+    console.error('Error al actualizar enlace:', err);
+    showMessageModal('Error al actualizar enlace: ' + err.message);
+  }
+}
+
 
 window.addEventListener('DOMContentLoaded', () => {
   cargarEstadisticas();
