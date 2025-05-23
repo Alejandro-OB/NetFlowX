@@ -12,11 +12,12 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchHosts();
   fetchActiveServers();
 
-  // ***** CAMBIO IMPORTANTE AQUÍ *****
-  // Removemos el onclick directamente del HTML y solo usamos el eventListener
+  // Asignar el listener al botón de inicio de servidor principal
   const startBtn = document.getElementById('start-video-server-btn');
   if (startBtn) {
-      startBtn.addEventListener('click', startVideoServer);
+      // Modificamos el listener para que llame a startVideoServer sin parámetros,
+      // la cual leerá los valores de los inputs.
+      startBtn.addEventListener('click', () => startVideoServer());
   }
 });
 
@@ -198,14 +199,27 @@ function updateActiveServersTable(servers) {
 
 
 // Iniciar servidor de video - Lógica centralizada
-async function startVideoServer() {
-  const hostSelect = document.getElementById('host-select');
-  const selectedHosts = Array.from(hostSelect.selectedOptions).map(opt => opt.value).filter(value => value !== ''); // Filtra la opción por defecto
-  
-  const videoPath = document.getElementById('video-path').value;
-  const ipDestino = document.getElementById('ip-destino').value;
-  const puertoUdp = document.getElementById('puerto-udp').value;
-  
+// Ahora acepta parámetros opcionales para permitir ser llamada desde startVideoFromUI
+async function startVideoServer(hostParam = null, videoPathParam = null, ipDestinoParam = null, puertoUdpParam = null) {
+  let selectedHosts = [];
+  let videoPath, ipDestino, puertoUdp;
+
+  if (hostParam && videoPathParam && ipDestinoParam && puertoUdpParam) {
+    // Si se llaman con parámetros (desde startVideoFromUI)
+    selectedHosts = [hostParam];
+    videoPath = videoPathParam;
+    ipDestino = ipDestinoParam;
+    puertoUdp = puertoUdpParam;
+  } else {
+    // Si se llaman desde el botón principal (sin parámetros)
+    const hostSelect = document.getElementById('host-select');
+    selectedHosts = Array.from(hostSelect.selectedOptions).map(opt => opt.value).filter(value => value !== ''); // Filtra la opción por defecto
+    
+    videoPath = document.getElementById('video-path').value;
+    ipDestino = document.getElementById('ip-destino').value;
+    puertoUdp = document.getElementById('puerto-udp').value;
+  }
+
   if (selectedHosts.length === 0) {
     showMessageModal('Advertencia', 'Por favor selecciona al menos un host.');
     return;
@@ -221,8 +235,10 @@ async function startVideoServer() {
   
   const startBtn = document.getElementById('start-video-server-btn');
   const originalText = startBtn.textContent;
-  startBtn.disabled = true;
-  startBtn.textContent = 'Iniciando...';
+  if (startBtn) { // Asegúrate de que el botón existe antes de manipularlo
+    startBtn.disabled = true;
+    startBtn.textContent = 'Iniciando...';
+  }
   
   let successCount = 0;
   let errorMessages = [];
@@ -274,8 +290,10 @@ async function startVideoServer() {
   }
   
   // Restaurar UI y recargar listas
-  startBtn.disabled = false;
-  startBtn.textContent = originalText;
+  if (startBtn) { // Asegúrate de que el botón existe antes de manipularlo
+    startBtn.disabled = false;
+    startBtn.textContent = originalText;
+  }
   fetchActiveServers(); 
   fetchHosts();       
 }
@@ -369,25 +387,9 @@ async function confirmVideoChange() {
 
 // Función para reiniciar un servidor (cuando estaba inactivo en la tabla de activos)
 async function startVideoFromUI(host, video_path, ip_destino, puerto) {
-    // Precarga los datos en los inputs del formulario "Asignar Nuevo Servidor"
-    const hostSelect = document.getElementById('host-select');
-    // Deselecciona todo primero
-    Array.from(hostSelect.options).forEach(option => {
-        option.selected = false;
-    });
-    // Luego selecciona el host específico
-    Array.from(hostSelect.options).forEach(option => {
-        if (option.value === host) {
-            option.selected = true;
-            return;
-        }
-    });
-
-    document.getElementById('video-path').value = video_path || '/mininet/sample.mp4';
-    document.getElementById('ip-destino').value = ip_destino || '10.0.0.2';
-    document.getElementById('puerto-udp').value = puerto || '5004';
-
-    startVideoServer();
+    // Ahora, en lugar de llamar a startVideoServer sin parámetros,
+    // la llamamos con los parámetros directamente.
+    startVideoServer(host, video_path, ip_destino, puerto);
 }
 
 // Función para eliminar el rol de servidor de un host
