@@ -53,17 +53,14 @@ def guardar_algoritmo_enrutamiento():
         return jsonify({"error": "Falta el algoritmo de enrutamiento"}), 400
 
     try:
-        # 1. Obtener la configuración actual más reciente (para preservar el algoritmo de balanceo)
-        # Usar fetch_one para obtener una sola fila como diccionario
+        # Añade esta línea para asegurar que siempre se inserta en minúsculas
+        algoritmo_enrutamiento = algoritmo_enrutamiento.lower() 
+
         current_config_row = fetch_one(
             "SELECT algoritmo_balanceo, algoritmo_enrutamiento FROM configuracion ORDER BY fecha_activacion DESC LIMIT 1;"
         )
-
-        # Si no hay configuración previa, algoritmo_balanceo_actual será None
         algoritmo_balanceo_actual = current_config_row['algoritmo_balanceo'] if current_config_row and 'algoritmo_balanceo' in current_config_row else None
 
-        # 2. Insertar una nueva fila con el algoritmo de enrutamiento actualizado y el de balanceo actual
-        # Usar execute_query para la operación INSERT
         query = """
             INSERT INTO configuracion (algoritmo_balanceo, algoritmo_enrutamiento)
             VALUES (%s, %s);
