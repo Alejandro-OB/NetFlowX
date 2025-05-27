@@ -1,6 +1,6 @@
 // --- Global Constants for API URLs ---
 const API_BASE_URL = 'http://192.168.18.151:5000';
-const MININET_AGENT_URL = 'http://192.168.18.206:5002'; // For Mininet agent calls
+const MININET_AGENT_URL = 'http://192.168.18.157:5002'; // For Mininet agent calls
 
 // --- Centralized Message Modal Functions ---
 // This function replaces alert/confirm and is used by all JS modules

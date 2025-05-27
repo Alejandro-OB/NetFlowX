@@ -25,8 +25,7 @@ from ryu.ofproto import inet
 from ryu.controller import dpset # Importar dpset para eventos de datapath
 
 import psycopg2.extras
-import random
-import ipaddress
+from datetime import datetime
 
 class DijkstraController(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -161,24 +160,28 @@ class DijkstraController(app_manager.RyuApp):
             else:
                 self.logger.error(f"Fallo al actualizar el estado del switch {dpid} a '{status}' en la base de datos.")
 
+
+
     def registrar_servidor_asignado(self, nombre_cliente, nombre_servidor):
         """
-        Registra en la base de datos el nombre del servidor asignado a un cliente.
+        Registra en la base de datos el nombre del servidor asignado y la hora actual al cliente especificado.
 
         :param nombre_cliente: Nombre del host cliente (ej. 'h1_1')
         :param nombre_servidor: Nombre del host del servidor asignado (ej. 'h3_1')
         """
         update_query = """
             UPDATE clientes_activos
-            SET servidor_asignado = %s
+            SET servidor_asignado = %s,
+                hora_asignacion = (NOW() AT TIME ZONE 'America/Bogota')
             WHERE host_cliente = %s;
         """
         try:
             with self.db_lock:
                 self.execute_query(update_query, (nombre_servidor, nombre_cliente))
-                self.logger.info(f"[DB] Servidor '{nombre_servidor}' asignado al cliente '{nombre_cliente}' en 'clientes_activos'.")
+                self.logger.info(f"[DB] Asignado servidor '{nombre_servidor}' a cliente '{nombre_cliente}'.")
         except Exception as e:
             self.logger.error(f"[DB] Error al registrar servidor asignado: {e}")
+
 
 
     def load_topology_from_db(self):

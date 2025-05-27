@@ -24,7 +24,7 @@ DB_CONFIG = {
 }
 
 # URL del agente de Mininet (corriendo en la máquina de Mininet)
-MININET_AGENT_URL = os.getenv("MININET_AGENT_URL", "http://192.168.18.206:5002") # Ejemplo: IP de la máquina de Mininet
+MININET_AGENT_URL = os.getenv("MININET_AGENT_URL", "http://192.168.18.157:5002") # Ejemplo: IP de la máquina de Mininet
 
 # No necesitamos el pool de IPs multicast ni las variables relacionadas
 
