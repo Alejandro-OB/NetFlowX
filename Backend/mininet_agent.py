@@ -4,194 +4,212 @@ import os
 import atexit
 import signal
 import time
+import sys
 from flask import Flask, request, jsonify
+from flask_cors import CORS
+import psycopg2 # Importar psycopg2
 
 app = Flask(__name__)
+CORS(app)
 
-# Diccionario en memoria para guardar PID de ffmpeg por host, incluyendo host_pid
-# Esto es crucial para que mnexec -a funcione correctamente en las funciones de detención
-video_processes_agent = {} # { "h1_1": {"pid": 12345, "host_pid": 67890, "last_active": timestamp} }
+# Diccionario para almacenar los procesos de video (FFmpeg) activos en el agente (para servidores)
+# Formato: { "h1_1": {"pid": ffmpeg_pid, "host_pid": mininet_host_pid_on_agent_machine, "server_ip": "10.0.0.1"} }
+ffmpeg_server_processes = {}
 
-# Función para obtener el PID del contenedor del host virtual en Mininet
-def get_host_pid(hostname):
-    """
-    Busca el PID del proceso 'mininet:<hostname>' que representa el namespace del host.
-    """
+# Diccionario para almacenar los procesos de FFplay (cliente) activos en el agente
+# Formato: { "h1_1": {"pid": ffplay_client_pid, "host_pid": mininet_host_pid_on_agent_machine} }
+ffplay_client_processes = {}
+
+# Configuración de la base de datos
+DB_NAME = os.environ.get('DB_NAME', 'geant_network')
+DB_USER = os.environ.get('DB_USER', 'geant_user') # Asegúrate de que este usuario tenga permisos para SELECT en 'hosts'
+DB_PASSWORD = os.environ.get('DB_PASSWORD', 'geant') # Reemplaza con tu contraseña real
+DB_HOST = os.environ.get('DB_HOST', '192.168.18.151') # O la IP donde se ejecuta tu base de datos
+DB_PORT = os.environ.get('DB_PORT', '5432')
+
+def get_db_connection():
+    """Establece y devuelve una conexión a la base de datos PostgreSQL."""
     try:
-        # Usa 'pgrep -f' para encontrar el proceso de mininet asociado al hostname
-        result = subprocess.run(['pgrep', '-f', f'mininet:{hostname}'],
-                                 capture_output=True, text=True, check=True)
-        # Toma la primera línea de salida (el PID)
-        pid = result.stdout.strip().split('\n')[0]
-        return int(pid)
-    except subprocess.CalledProcessError:
-        print(f"Agente: No se encontró el PID del proceso Mininet para '{hostname}'.")
+        conn = psycopg2.connect(
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT
+        )
+        return conn
+    except Exception as e:
+        print(f"Agente: Error conectando a la base de datos: {e}")
         return None
-    except ValueError:
-        print(f"Agente: pgrep para '{hostname}' devolvió una salida no numérica.")
+
+def get_host_ip_from_db(hostname):
+    """
+    Obtiene la dirección IPv4 de un host desde la base de datos.
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return None
+        cursor = conn.cursor()
+        cursor.execute("SELECT ipv4 FROM hosts WHERE nombre = %s", (hostname,))
+        result = cursor.fetchone()
+        if result:
+            return result[0]
         return None
     except Exception as e:
-        print(f"Agente: Error inesperado al obtener PID del host '{hostname}': {e}")
+        print(f"Agente: Error al consultar IP de {hostname} en la DB: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_host_pid(hostname):
+    """
+    Obtiene el PID del proceso de Mininet asociado a un hostname específico.
+    Este PID es el del proceso 'mnexec' que ejecuta el shell del host.
+    """
+    try:
+        result = subprocess.run(['pgrep', '-f', f'mininet:{hostname}'], capture_output=True, text=True, check=True)
+        pid = result.stdout.strip().split('\n')[0]
+        return int(pid)
+    except Exception as e:
+        print(f"Agente: Error obteniendo PID para '{hostname}': {e}")
         return None
 
-# Función para limpiar procesos de ffmpeg al cerrar el agente
-def cleanup_agent_processes():
+def kill_media_processes_on_host(hostname, host_pid, process_type="any", specific_pid=None):
     """
-    Intenta terminar todos los procesos de video activos gestionados por el agente.
+    Mata procesos FFmpeg, FFplay o python3 -m http.server dentro del contexto de un host Mininet.
+    Si se proporciona un PID específico, mata solo ese PID. Si no, elimina todos los procesos del tipo.
     """
-    print("Agente: Intentando terminar todos los procesos de video activos...")
-    for host in list(video_processes_agent.keys()):
-        info = video_processes_agent.get(host)
-        if not info:
-            continue
-
-        ffmpeg_pid = info.get("pid")
-        host_pid = info.get("host_pid")
-
-        # Antes de intentar matar el registrado, intenta matar cualquier ffmpeg
-        # Esto es más robusto para la limpieza general
-        kill_all_ffmpeg_on_host(host, host_pid)
-            
-        # Siempre eliminar la entrada de la caché en memoria del agente después de intentar la limpieza
-        if host in video_processes_agent:
-            del video_processes_agent[host]
-
-    print("Agente: Limpieza de procesos de video completada.")
-
-# Registra la función de limpieza para que se ejecute al salir
-atexit.register(cleanup_agent_processes)
-
-# Manejadores de señal para una limpieza más robusta al detener el agente
-def signal_handler_agent(signum, frame):
-    print(f"Agente: Señal {signum} recibida. Iniciando limpieza...")
-    cleanup_agent_processes()
-    time.sleep(1)
-    os._exit(0)
-
-signal.signal(signal.SIGTERM, signal_handler_agent)
-signal.signal(signal.SIGINT, signal_handler_agent)
-
-# --- NUEVA FUNCIÓN: Mata todos los procesos ffmpeg en un host específico ---
-def kill_all_ffmpeg_on_host(hostname, host_pid):
     if not host_pid:
-        print(f"Agente: No se puede limpiar FFmpeg en {hostname}: host_pid desconocido.")
+        print(f"[WARN] No se proporcionó host_pid para {hostname}")
         return
 
     try:
-        # Busca PIDs de ffmpeg en el namespace del host
-        cmd_find_ffmpeg = ['mnexec', '-a', str(host_pid), 'pgrep', '-f', 'ffmpeg']
-        result_find = subprocess.run(cmd_find_ffmpeg, capture_output=True, text=True, check=False, timeout=5)
+        # Si se especifica un PID, intenta matarlo directamente
+        if specific_pid:
+            subprocess.run(['mnexec', '-a', str(host_pid), 'kill', '-9', str(specific_pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"[OK] Proceso PID {specific_pid} ({process_type}) detenido en {hostname}")
+            return
 
-        if result_find.returncode == 0 and result_find.stdout.strip():
-            pids_to_kill = [p for p in result_find.stdout.strip().split('\n') if p.isdigit()]
-            
-            if pids_to_kill:
-                print(f"Agente: Encontrados PIDs de FFmpeg en {hostname} para detener: {pids_to_kill}")
-                for pid in pids_to_kill:
-                    try:
-                        subprocess.run(
-                            ['mnexec', '-a', str(host_pid), 'kill', '-9', str(pid)],
-                            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
-                        )
-                        print(f"Agente: Proceso FFmpeg ({pid}) en {hostname} detenido.")
-                    except subprocess.TimeoutExpired:
-                        print(f"Agente: Timeout al intentar matar FFmpeg ({pid}) en {hostname}.")
-                    except Exception as e:
-                        print(f"Agente: Error al intentar matar FFmpeg ({pid}) en {hostname}: {e}")
-            else:
-                print(f"Agente: No se encontraron procesos FFmpeg activos para {hostname}.")
-        else:
-            print(f"Agente: No se encontraron procesos FFmpeg activos para {hostname} (pgrep output: '{result_find.stdout.strip()}').")
-    except subprocess.TimeoutExpired:
-        print(f"Agente: Timeout al intentar listar procesos FFmpeg en {hostname} para limpieza.")
+        # Seleccionar patrón de proceso
+        patrones = {
+            "server": ['ffmpeg', 'http.server', 'python3 -m http.server'],
+            "client": ['ffplay'],
+            "any": ['ffmpeg', 'ffplay', 'http.server', 'python3 -m http.server']
+        }
+
+        patrones_a_buscar = patrones.get(process_type, patrones["any"])
+
+        for patron in patrones_a_buscar:
+            result = subprocess.run(
+                ['mnexec', '-a', str(host_pid), 'pgrep', '-f', patron],
+                capture_output=True, text=True
+            )
+            pids = [pid for pid in result.stdout.strip().split('\n') if pid.isdigit()]
+
+            if not pids:
+                print(f"[INFO] No se encontraron procesos '{patron}' en {hostname}")
+                continue
+
+            for pid in pids:
+                subprocess.run(['mnexec', '-a', str(host_pid), 'kill', '-9', pid],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"[OK] Proceso {patron} (PID: {pid}) eliminado en {hostname}")
+
     except Exception as e:
-        print(f"Agente: Error inesperado al intentar limpiar procesos FFmpeg en {hostname}: {e}")
+        print(f"[ERROR] Error eliminando procesos en {hostname}: {e}")
 
 
-@app.route('/mininet/start_ffmpeg', methods=['POST'])
-def start_ffmpeg_on_host():
+
+def cleanup_agent_processes():
     """
-    Inicia un proceso ffmpeg para transmitir video en un host específico de Mininet.
-    Antes de iniciar, asegura que no haya otros procesos ffmpeg activos en el host.
+    Función de limpieza que se ejecuta al cerrar el agente.
+    Mata todos los procesos FFmpeg (servidor) y FFplay (cliente) iniciados por el agente.
+    """
+    print("Agente: Realizando limpieza de procesos activos (FFmpeg servidor y FFplay cliente)...")
+    for host, info in list(ffmpeg_server_processes.items()):
+        kill_media_processes_on_host(host, info.get("host_pid"), "server")
+        del ffmpeg_server_processes[host]
+    
+    for host, info in list(ffplay_client_processes.items()):
+        kill_media_processes_on_host(host, info.get("host_pid"), "client")
+        del ffplay_client_processes[host]
+    print("Agente: Limpieza completada.")
+
+atexit.register(cleanup_agent_processes)
+
+def signal_handler(signum, frame):
+    print(f"Agente: Señal {signum} recibida. Iniciando limpieza y saliendo.")
+    cleanup_agent_processes()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
+
+
+
+@app.route('/mininet/start_http_server', methods=['POST'])
+def start_http_server_on_host():
+    """
+    Inicia un servidor HTTP (python3 -m http.server) en un host de Mininet.
+    Espera JSON con: host (el host que será el servidor), puerto.
     """
     data = request.get_json()
-
     host = data.get('host')
-    video_path = data.get('video_path')
-    ip_destino = data.get('ip_destino')
     puerto = data.get('puerto')
 
-    # Validaciones básicas de parámetros
-    if not all([host, video_path, ip_destino, puerto]):
-        return jsonify({"error": "Faltan parámetros requeridos (host, video_path, ip_destino, puerto)"}), 400
-
+    if not all([host, puerto]):
+        return jsonify({"error": "Faltan parámetros: host, puerto"}), 400
+    
     if not re.match(r'^[a-zA-Z0-9_-]+$', host):
         return jsonify({"error": "Parámetro 'host' inválido"}), 400
-
-    if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip_destino):
-        return jsonify({"error": "Parámetro 'ip_destino' inválido"}), 400
 
     try:
         puerto = int(puerto)
         if not (1024 <= puerto <= 65535):
-            raise ValueError("Puerto fuera de rango")
+            raise ValueError
     except ValueError:
         return jsonify({"error": "Parámetro 'puerto' inválido"}), 400
 
+    # Obtener IP desde la base de datos solo por información (no se usa en este caso)
+    server_ip = get_host_ip_from_db(host)
+    if not server_ip:
+        return jsonify({"error": f"No se pudo obtener la IP del host '{host}' desde la base de datos."}), 500
+
+    # Si ya hay un proceso activo, lo detenemos
+    if host in ffmpeg_server_processes:
+        kill_media_processes_on_host(host, ffmpeg_server_processes[host].get("host_pid"), "server")
+        del ffmpeg_server_processes[host]
+
     pid_host = get_host_pid(host)
     if not pid_host:
-        return jsonify({"error": f"No se encontró el PID del host '{host}'. Asegúrate de que Mininet esté corriendo y el host exista."}), 404
-
-    # --- CAMBIO CLAVE AQUÍ: Matar *todos* los procesos ffmpeg existentes antes de iniciar uno nuevo ---
-    print(f"Agente: Ejecutando limpieza de procesos FFmpeg en {host} antes de iniciar uno nuevo...")
-    kill_all_ffmpeg_on_host(host, pid_host)
-    # Limpiar también la entrada de la caché del agente, ya que hemos matado todo
-    if host in video_processes_agent:
-        del video_processes_agent[host]
-
-    # Verificar existencia del archivo de video en el host de Mininet
-    try:
-        check_file_cmd = ['mnexec', '-a', str(pid_host), 'test', '-f', video_path]
-        check_result = subprocess.run(check_file_cmd, capture_output=True, text=True, timeout=10)
-        if check_result.returncode != 0:
-            return jsonify({"error": f"El archivo de video '{video_path}' NO existe o no es accesible en el host '{host}'"}), 400
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": f"Timeout al verificar existencia del archivo en {host}."}), 500
-    except Exception as e:
-        return jsonify({"error": f"Error al verificar existencia del archivo en {host}: {str(e)}"}), 500
+        return jsonify({"error": f"No se pudo encontrar el PID del host de Mininet: {host}"}), 500
 
     try:
-        # Comando ffmpeg para transmitir video en bucle
+        # Iniciar el servidor HTTP con python3 -m http.server
         process = subprocess.Popen(
-            ['mnexec', '-a', str(pid_host), 'ffmpeg',
-             '-stream_loop', '-1', '-re',
-             '-i', video_path,
-             '-f', 'mpegts', f'udp://{ip_destino}:{puerto}',
-             '-loglevel', 'quiet'],
+            ['mnexec', '-a', str(pid_host), 'python3', '-m', 'http.server', str(puerto)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             preexec_fn=os.setsid
         )
-        # Almacenar el PID del proceso ffmpeg y el PID del host de Mininet
-        video_processes_agent[host] = {"pid": process.pid, "host_pid": pid_host}
-
-        print(f"Agente: Proceso FFmpeg iniciado para {host}. Procesos activos: {video_processes_agent}")
-
-        return jsonify({
-            "success": True,
-            "message": f"Transmisión iniciada en Mininet desde {host} a udp://{ip_destino}:{puerto}",
-            "ffmpeg_pid": process.pid
-        })
+        ffmpeg_server_processes[host] = {"pid": process.pid, "host_pid": pid_host, "server_ip": server_ip}
+        print(f"Agente: Servidor HTTP iniciado en {host} (IP: {server_ip}) en puerto {puerto}. PID: {process.pid}")
+        return jsonify({"success": True, "message": f"Servidor HTTP iniciado en {server_ip}:{puerto}", "pid": process.pid, "server_ip": server_ip}), 200
     except Exception as e:
-        print(f"Agente: Fallo al iniciar el proceso ffmpeg en {host}: {e}")
-        return jsonify({"error": "Fallo al iniciar el proceso ffmpeg", "details": str(e)}), 500
+        print(f"Agente: Error al iniciar servidor HTTP en {host}: {e}")
+        return jsonify({"error": f"Error al iniciar servidor HTTP: {e}"}), 500
 
-
-@app.route('/mininet/stop_ffmpeg', methods=['POST'])
-def stop_ffmpeg_on_host():
+@app.route('/mininet/stop_http_server', methods=['POST'])
+def stop_http_server_on_host():
     """
-    Detiene un proceso ffmpeg específico en un host de Mininet.
-    Se ha mejorado para intentar matar *todos* los procesos FFmpeg en el host.
+    Detiene el proceso de servidor HTTP (python3 -m http.server) que se esté ejecutando en un host de Mininet.
+    Espera JSON con: host.
     """
     data = request.get_json()
     host = data.get('host')
@@ -199,78 +217,99 @@ def stop_ffmpeg_on_host():
     if not host or not re.match(r'^[a-zA-Z0-9_-]+$', host):
         return jsonify({"error": "Parámetro 'host' inválido"}), 400
 
-    # Obtener el host_pid directamente, si no está en caché, intentarlo
-    # Esto es crucial si la entrada en video_processes_agent se perdió
-    pid_host = get_host_pid(host)
+    pid_host = None
+    if host in ffmpeg_server_processes:
+        pid_host = ffmpeg_server_processes[host].get("host_pid")
+
     if not pid_host:
-        print(f"Agente: No se encontró el PID del host '{host}'. Asumiendo que Mininet no está activo o el host no existe.")
-        # Si no se puede obtener el PID del host, no se puede hacer nada
-        if host in video_processes_agent:
-            del video_processes_agent[host] # Limpiar la caché si no se puede acceder al host
-        return jsonify({"success": True, "message": f"No se pudo encontrar el host '{host}' para detener FFmpeg."})
+        pid_host = get_host_pid(host)
 
-    # Intentar detener todos los procesos ffmpeg en el host
-    print(f"Agente: Solicitud de detención para {host}. Ejecutando limpieza completa de FFmpeg en el host.")
-    kill_all_ffmpeg_on_host(host, pid_host)
+    if not pid_host:
+        return jsonify({"error": f"No se encontró el PID del host '{host}'"}), 500
 
-    # Limpiar la entrada de la caché del agente para este host
-    if host in video_processes_agent:
-        current_ffmpeg_pid = video_processes_agent[host].get("pid", "N/A")
-        del video_processes_agent[host]
-        print(f"Agente: Entrada de caché para {host} (PID: {current_ffmpeg_pid}) eliminada.")
-
-    print(f"Agente: Procesos activos después de detener: {video_processes_agent}")
-    return jsonify({"success": True, "message": f"Todos los procesos ffmpeg asociados a {host} han sido terminados."})
+    # Detener proceso http.server en ese host
+    try:
+        kill_media_processes_on_host(host, pid_host, process_type="server")
+        if host in ffmpeg_server_processes:
+            del ffmpeg_server_processes[host]
+        print(f"Agente: Servidor HTTP detenido y registro eliminado para {host}.")
+        return jsonify({"success": True, "message": f"Servidor HTTP detenido en {host}"}), 200
+    except Exception as e:
+        print(f"Agente: Error al detener el servidor HTTP en {host}: {e}")
+        return jsonify({"error": f"Error al detener servidor HTTP: {e}"}), 500
 
 
-@app.route('/mininet/check_file', methods=['POST'])
-def check_file_exists():
+
+
+@app.route('/mininet/start_http_client', methods=['POST'])
+def start_http_client_on_host():
     """
-    Verifica si un archivo existe en un host de Mininet.
+    Inicia un cliente FFplay en un host de Mininet para reproducir un video vía HTTP.
+    Espera JSON con: host (cliente), video_file (nombre del archivo).
+    El servidor siempre será 10.0.0.100 y el puerto 8080 (VIP HTTP).
     """
     data = request.get_json()
     host = data.get('host')
-    file_path = data.get('file_path')
+    video_file = data.get('video_file')
 
-    if not all([host, file_path]):
-        return jsonify({"error": "Faltan parámetros requeridos"}), 400
-    if not re.match(r'^[a-zA-Z0-9_-]+$', host):
-        return jsonify({"error": "Parámetro 'host' inválido"}), 400
+    # Validaciones básicas
+    if not host or not video_file:
+        return jsonify({"error": "Faltan parámetros: host o video_file"}), 400
+
+    if not re.match(r'^[a-zA-Z0-9._/-]+$', video_file):
+        return jsonify({"error": "Nombre de archivo inválido"}), 400
 
     pid_host = get_host_pid(host)
     if not pid_host:
-        return jsonify({"error": f"No se encontró el PID del host '{host}'"}), 404
+        return jsonify({"error": f"No se pudo encontrar el PID del host Mininet: {host}"}), 500
+
+    # IP virtual y puerto fijo
+    server_ip = "10.0.0.100"
+    puerto = 8080
 
     try:
-        check_cmd = ['mnexec', '-a', str(pid_host), 'test', '-f', file_path]
-        result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            return jsonify({"exists": True, "message": f"El archivo '{file_path}' existe en {host}."})
-        else:
-            return jsonify({"exists": False, "message": f"El archivo '{file_path}' NO existe en {host}.", "details": result.stderr.strip()})
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": f"Timeout al verificar archivo en {host}."}), 500
+        url = f"http://{server_ip}:{puerto}/{video_file}"
+        process = subprocess.Popen(
+            ['mnexec', '-a', str(pid_host), 'ffplay', '-autoexit', '-loglevel', 'quiet', url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid
+        )
+        ffplay_client_processes[host] = {"pid": process.pid, "host_pid": pid_host}
+        print(f"Agente: Cliente FFplay iniciado en {host} accediendo a {url}. PID: {process.pid}")
+        return jsonify({
+            "success": True,
+            "message": f"Cliente FFplay accediendo a {url}",
+            "ffplay_client_pid": process.pid
+        }), 200
     except Exception as e:
-        print(f"Agente: Error al verificar archivo en {host}: {e}")
-        return jsonify({"error": f"Error al verificar archivo en {host}: {str(e)}"}), 500
+        print(f"Agente: Error al iniciar ffplay en {host}: {e}")
+        return jsonify({"error": f"Error al iniciar cliente FFplay: {e}"}), 500
 
+@app.route('/mininet/stop_http_client', methods=['POST'])
+def stop_http_client_on_host():
+    """
+    Detiene el cliente FFplay que esté activo en un host Mininet.
+    Espera JSON con: host.
+    """
+    data = request.get_json()
+    host = data.get('host')
 
-@app.route('/mininet/ping', methods=['GET'])
-def agent_ping():
-    """
-    Endpoint simple para verificar que el agente está operativo.
-    """
-    return jsonify({"status": "ok", "message": "Agente Mininet operativo"})
+    if not host or host not in ffplay_client_processes:
+        return jsonify({"message": "No se encontró cliente FFplay activo para este host."}), 404
 
-@app.route('/mininet/processes', methods=['GET'])
-def get_running_processes():
-    """
-    Retorna la lista de procesos FFmpeg que el agente tiene registrados como activos.
-    """
-    # Retorna una copia para evitar modificar el diccionario original desde fuera
-    return jsonify(video_processes_agent), 200
+    pid = ffplay_client_processes[host].get("pid")
+    host_pid = ffplay_client_processes[host].get("host_pid")
+
+    if pid and host_pid:
+        kill_media_processes_on_host(host, host_pid, "client", specific_pid=pid)
+        del ffplay_client_processes[host]
+        return jsonify({"success": True, "message": f"Cliente FFplay detenido en {host}"}), 200
+    else:
+        return jsonify({"error": "PID o contexto del cliente incompleto para detenerlo."}), 500
+
 
 if __name__ == '__main__':
-    print("Agente: Iniciando el servidor Flask del agente...")
-    app.run(host='0.0.0.0', port=5002)
-    print("Agente: El servidor Flask del agente ha terminado.")
+    print("Agente: Intentando iniciar el servidor Flask...")
+    app.run(host='0.0.0.0', port=5002, debug=True)
+    print("Agente: Servidor Flask detenido.")
