@@ -161,6 +161,25 @@ class DijkstraController(app_manager.RyuApp):
             else:
                 self.logger.error(f"Fallo al actualizar el estado del switch {dpid} a '{status}' en la base de datos.")
 
+    def registrar_servidor_asignado(self, nombre_cliente, nombre_servidor):
+        """
+        Registra en la base de datos el nombre del servidor asignado a un cliente.
+
+        :param nombre_cliente: Nombre del host cliente (ej. 'h1_1')
+        :param nombre_servidor: Nombre del host del servidor asignado (ej. 'h3_1')
+        """
+        update_query = """
+            UPDATE clientes_activos
+            SET servidor_asignado = %s
+            WHERE host_cliente = %s;
+        """
+        try:
+            with self.db_lock:
+                self.execute_query(update_query, (nombre_servidor, nombre_cliente))
+                self.logger.info(f"[DB] Servidor '{nombre_servidor}' asignado al cliente '{nombre_cliente}' en 'clientes_activos'.")
+        except Exception as e:
+            self.logger.error(f"[DB] Error al registrar servidor asignado: {e}")
+
 
     def load_topology_from_db(self):
         """
@@ -614,6 +633,12 @@ class DijkstraController(app_manager.RyuApp):
                                     for name, info in self.active_web_servers.items():
                                         if info == selected_server_info:
                                             self.client_to_server_map[flow_key] = name
+                                            nombre_cliente = next((hn for hn, info in self.host_info.items() if info['ip'] == src_ip), None)
+                                            if nombre_cliente:
+                                                self.registrar_servidor_asignado(nombre_cliente, name)
+                                            else:
+                                                self.logger.warning(f"No se pudo determinar el nombre del cliente para IP {src_ip}")
+
                                             break
                         else:
                             self.logger.debug(f"[DEBUG] No hay asignación previa para {flow_key}, seleccionando nuevo servidor.")
@@ -623,6 +648,11 @@ class DijkstraController(app_manager.RyuApp):
                                 for name, info in self.active_web_servers.items():
                                     if info == selected_server_info:
                                         self.client_to_server_map[flow_key] = name
+                                        nombre_cliente = next((hn for hn, info in self.host_info.items() if info['ip'] == src_ip), None)
+                                        if nombre_cliente:
+                                            self.registrar_servidor_asignado(nombre_cliente, name)
+                                        else:
+                                                self.logger.warning(f"No se pudo determinar el nombre del cliente para IP {src_ip}")
                                         break
                                 self.logger.info(f"Asignando cliente {src_ip} a servidor {selected_server_info['ip']} (DPID={selected_server_info['dpid']}, Port={selected_server_info['port']}).")
                             else:
