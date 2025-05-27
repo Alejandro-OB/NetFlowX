@@ -47,10 +47,11 @@ async function loadActiveServers() {
 
 document.getElementById('add-server-btn').addEventListener('click', async () => {
     const hostName = document.getElementById('server-host-name').value;
+    const videoPath = document.getElementById('server-video-path').value;
     const serverWeight = parseInt(document.getElementById('server-weight').value);
     const statusMessage = document.getElementById('server-status-message');
 
-    if (!hostName || isNaN(serverWeight) || serverWeight < 1) {
+    if (!hostName || !videoPath || isNaN(serverWeight) || serverWeight < 1) {
         statusMessage.textContent = 'Por favor, completa todos los campos y asegúrate de que el peso sea un número positivo.';
         statusMessage.className = 'mt-2 text-sm text-red-600';
         return;
@@ -60,21 +61,18 @@ document.getElementById('add-server-btn').addEventListener('click', async () => 
         const response = await fetch(`${API_BASE_URL}/servers/add`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                host_name: hostName,
-                video_path: '', // No se usa más para el servidor HTTP
-                server_weight: serverWeight
-            })
+            body: JSON.stringify({ host_name: hostName, video_path: videoPath, server_weight: serverWeight })
         });
         const data = await response.json();
         if (response.ok) {
             statusMessage.textContent = data.message;
             statusMessage.className = 'mt-2 text-sm text-green-600';
-            showMessageModal('Éxito', `Servidor ${hostName} activado. IP del servidor: ${data.server_ip}:${data.port}`);
+            showMessageModal('Éxito', `Servidor ${hostName} activado. IP Multicast: ${data.multicast_ip}:${data.multicast_port}`);
             document.getElementById('server-host-name').value = '';
+            document.getElementById('server-video-path').value = '';
             document.getElementById('server-weight').value = '1';
             loadActiveServers(); // Refrescar lista de servidores
-            updateDashboard();   // Refrescar dashboard
+            updateDashboard(); // Refrescar dashboard (función de index.js)
         } else {
             statusMessage.textContent = data.error;
             statusMessage.className = 'mt-2 text-sm text-red-600';

@@ -1,5 +1,5 @@
 // --- Global Constants for API URLs ---
-const API_BASE_URL = 'http://192.168.18.151:5000'; 
+const API_BASE_URL = 'http://192.168.18.151:5000';
 const MININET_AGENT_URL = 'http://192.168.18.206:5002'; // For Mininet agent calls
 
 // --- Centralized Message Modal Functions ---
@@ -18,7 +18,7 @@ function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
   confirmBtn.onclick = () => {
     modal.classList.add('hidden');
     if (isConfirm && onConfirm) {
-      onConfirm(); 
+      onConfirm();
     }
   };
 
@@ -43,7 +43,7 @@ let polylines = []; // Array of polyline objects
 async function loadTopology() {
     try {
         const response = await fetch(`${API_BASE_URL}/topology/get`);
-        
+
         // Check if the HTTP response was successful
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
@@ -76,8 +76,8 @@ async function loadTopology() {
             data.switches.forEach(sw => {
                 // Ensure latitude and longitude exist and are numbers
                 if (typeof sw.latitud === 'number' && typeof sw.longitud === 'number') {
-                    const marker = L.marker([sw.latitud, sw.longitud]).addTo(map) 
-                        .bindPopup(`<b>${sw.nombre}</b><br>DPID: ${sw.dpid}`); 
+                    const marker = L.marker([sw.latitud, sw.longitud]).addTo(map)
+                        .bindPopup(`<b>${sw.nombre}</b><br>DPID: ${sw.dpid}<br>Estado: ${sw.status || 'Desconocido'}`);
                     markers[sw.dpid] = marker;
                     allLatLngs.push([sw.latitud, sw.longitud]); // Add to the list to adjust bounds
                 } else {
@@ -97,15 +97,15 @@ async function loadTopology() {
                     // Slight displacement from the switch for visibility
                     const lat = connectedSwitch.latitud + (Math.random() - 0.5) * 0.01;
                     const lon = connectedSwitch.longitud + (Math.random() - 0.5) * 0.01;
-                    L.marker([lat, lon], { 
-                        icon: L.divIcon({ 
-                            className: 'custom-host-icon', 
-                            html: `<div style="background-color: #4CAF50; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold;">H</div>`, 
-                            iconSize: [24, 24], 
-                            iconAnchor: [12, 12] 
+                    L.marker([lat, lon], {
+                        icon: L.divIcon({
+                            className: 'custom-host-icon',
+                            html: `<div style="background-color: #4CAF50; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold;">H</div>`,
+                            iconSize: [24, 24],
+                            iconAnchor: [12, 12]
                         })
-                    }).addTo(map) 
-                    .bindPopup(`<b>${host.nombre}</b><br>MAC: ${host.mac}<br>IP: ${host.ip}<br>Connected to: ${connectedSwitch.nombre}`); 
+                    }).addTo(map)
+                    .bindPopup(`<b>${host.nombre}</b><br>MAC: ${host.mac}<br>IP: ${host.ip}<br>Connected to: ${connectedSwitch.nombre}`);
                     allLatLngs.push([lat, lon]); // Add to the list to adjust bounds
                 } else {
                     console.warn(`Invalid connected switch coordinates for host ${host.nombre}:`, connectedSwitch);
@@ -121,22 +121,22 @@ async function loadTopology() {
             data.enlaces.forEach(link => {
                 const sourceSwitch = data.switches.find(sw => sw.id_switch === link.id_origen);
                 const destSwitch = data.switches.find(sw => sw.id_switch === link.id_destino);
-                if (sourceSwitch && destSwitch && 
+                if (sourceSwitch && destSwitch &&
                     typeof sourceSwitch.latitud === 'number' && typeof sourceSwitch.longitud === 'number' &&
                     typeof destSwitch.latitud === 'number' && typeof destSwitch.longitud === 'number') {
-                    
+
                     // Use the colorByBandwidth function for link color
                     const linkColor = colorPorAnchoBanda(link.ancho_banda);
 
-                    const polyline = L.polyline([ 
-                        [sourceSwitch.latitud, sourceSwitch.longitud], 
-                        [destSwitch.latitud, destSwitch.longitud] 
-                    ], { 
+                    const polyline = L.polyline([
+                        [sourceSwitch.latitud, sourceSwitch.longitud],
+                        [destSwitch.latitud, destSwitch.longitud]
+                    ], {
                         color: linkColor, // Apply color based on bandwidth
-                        weight: 3, 
-                        opacity: 0.7 
-                    }).addTo(map) 
-                      .bindPopup(`Link: ${sourceSwitch.nombre} <-> ${destSwitch.nombre}<br>BW: ${link.ancho_banda} Mbps`); 
+                        weight: 3,
+                        opacity: 0.7
+                    }).addTo(map)
+                      .bindPopup(`Link: ${sourceSwitch.nombre} <-> ${destSwitch.nombre}<br>BW: ${link.ancho_banda} Mbps`);
                     polylines.push(polyline);
                     allLatLngs.push([sourceSwitch.latitud, sourceSwitch.longitud]);
                     allLatLngs.push([destSwitch.latitud, destSwitch.longitud]);
@@ -170,7 +170,7 @@ async function updateDashboard() {
     try {
         // Get active server count
         const serversResponse = await fetch(`${API_BASE_URL}/servers/active_servers`);
-        
+
         // Check if the HTTP response was successful
         if (!serversResponse.ok) {
             const errorData = await serversResponse.json().catch(() => ({ message: 'Unknown error' }));
@@ -179,11 +179,11 @@ async function updateDashboard() {
 
         const serversData = await serversResponse.json();
         document.getElementById('active-servers-count').textContent = serversData.length;
-        
+
 
         // Get current load balancing algorithm
         const configResponse = await fetch(`${API_BASE_URL}/config/current`);
-        
+
         // Check if the HTTP response was successful
         if (!configResponse.ok) {
             const errorData = await configResponse.json().catch(() => ({ message: 'Unknown error' }));
@@ -194,17 +194,61 @@ async function updateDashboard() {
         document.getElementById('current-lb-algo').textContent = configData.algoritmo_balanceo || 'Not configured';
         document.getElementById('current-routing-algo').textContent = configData.algoritmo_enrutamiento || 'Not configured';
 
+        // Lógica para mostrar/ocultar el input de peso del servidor para WRR
+        const serverWeightInputGroup = document.getElementById('server-weight-input-group');
+        if (serverWeightInputGroup) { // Asegúrate de que el elemento existe antes de intentar manipularlo
+            if (configData.algoritmo_balanceo === 'weighted_round_robin') {
+                serverWeightInputGroup.classList.remove('hidden');
+            } else {
+                serverWeightInputGroup.classList.add('hidden');
+            }
+        }
+
+        // Update controller status based on switch connectivity
+        await updateControllerStatus();
+
     } catch (error) {
         console.error('Error updating dashboard:', error);
         showMessageModal('Error', 'Could not update dashboard: ' + error.message);
     }
 }
 
+async function updateControllerStatus() {
+    const controllerStatusElement = document.getElementById('controller-status');
+    try {
+        const response = await fetch(`${API_BASE_URL}/topology/get`);
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+            throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || response.statusText}`);
+        }
+        const data = await response.json();
+        const switches = data.switches || [];
+
+        let isConnected = false;
+        if (switches.length > 0) {
+            isConnected = switches.some(s => s.status === 'conectado');
+        }
+
+        if (isConnected) {
+            controllerStatusElement.textContent = 'Conectado';
+            controllerStatusElement.className = 'text-green-700'; // Green for connected
+        } else {
+            controllerStatusElement.textContent = 'Desconectado';
+            controllerStatusElement.className = 'text-red-700'; // Red for disconnected
+        }
+    } catch (error) {
+        console.error('Error updating controller status:', error);
+        controllerStatusElement.textContent = 'Error de Conexión';
+        controllerStatusElement.className = 'text-red-700'; // Red for error
+    }
+}
+
+
 // --- Configuration Functions ---
 async function loadConfigHistory() {
     try {
         const response = await fetch(`${API_BASE_URL}/config/history`);
-        
+
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
             throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || response.statusText}`);
@@ -302,8 +346,8 @@ document.getElementById('save-routing-algo').addEventListener('click', async () 
 async function cargarEstadisticas() {
     try {
         // Adjust this URL to your actual statistics endpoint
-        const res = await fetch(`${API_BASE_URL}/stats/resumen`); 
-        
+        const res = await fetch(`${API_BASE_URL}/stats/resumen`);
+
         if (!res.ok) {
             const errorData = await res.json().catch(() => ({ message: 'Unknown error' }));
             throw new Error(`HTTP error! status: ${res.status} - ${errorData.message || res.statusText}`);
@@ -328,8 +372,8 @@ async function cargarEstadisticas() {
 async function cargarLogs() {
     try {
         // Adjust this URL to your actual logs endpoint
-        const res = await fetch(`${API_BASE_URL}/stats/logs`); 
-        
+        const res = await fetch(`${API_BASE_URL}/stats/logs`);
+
         if (!res.ok) {
             const errorData = await res.json().catch(() => ({ message: 'Unknown error' }));
             throw new Error(`HTTP error! status: ${res.status} - ${errorData.message || res.statusText}`);

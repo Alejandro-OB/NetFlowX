@@ -1,10 +1,17 @@
 from flask import Blueprint, jsonify
-from services.db import fetch_all, fetch_one
 import threading
 import time
 from datetime import datetime # Importar datetime para el formato de fecha
 
+# Importar las funciones de conexión y consulta a la base de datos desde services.db
+from services.db import fetch_all, fetch_one, execute_query # execute_query no se usa aquí, pero se mantiene por si acaso
+
 client_requests_bp = Blueprint('client_requests', __name__)
+
+# --- Constantes para la VIP ---
+# Asegúrate de que esta VIP coincida con la configuración en tu controlador SDN
+VIP_IP = "10.0.0.100"
+VIP_PORT = 5004 # Puerto de servicio que el cliente usará para conectarse a la VIP
 
 # --- Estado en memoria para Round Robin y Weighted Round Robin ---
 # Usando un Lock para la seguridad de los hilos si múltiples solicitudes de clientes llegan concurrentemente
@@ -18,6 +25,9 @@ CACHE_TTL = 10 # segundos para refrescar la lista de servidores de la DB
 wrr_server_list = [] # Lista expandida para Weighted Round Robin
 last_wrr_list_update = 0 # Timestamp de la última actualización de la lista WRR
 
+# --- Fin de las funciones de base de datos (ahora importadas) ---
+
+
 def refresh_active_servers_cache():
     """
     Refresca la caché de servidores activos desde la base de datos si ha expirado el TTL.
@@ -26,85 +36,86 @@ def refresh_active_servers_cache():
     if time.time() - last_cache_update > CACHE_TTL:
         print("Refrescando la caché de servidores activos...")
         query = "SELECT host_name, ip_destino, puerto, server_weight FROM servidores_vlc_activos WHERE status = 'activo';"
-        # fetch_all devuelve una lista de diccionarios si usas DictCursor
-        active_servers_cache = fetch_all(query)
+        active_servers_cache = fetch_all(query) # Usar la función fetch_all importada
         last_cache_update = time.time()
-    return active_servers_cache
+        print(f"Caché de servidores activos refrescada: {active_servers_cache}")
 
-def generate_wrr_list():
+def refresh_wrr_list():
     """
-    Genera la lista expandida de servidores para Weighted Round Robin.
-    Cada servidor aparece 'server_weight' veces en la lista.
+    Reconstruye la lista expandida para Weighted Round Robin basada en la caché actual.
     """
     global wrr_server_list, last_wrr_list_update
-    
-    # Asegurarse de que la caché de servidores activos esté fresca antes de generar la lista WRR
-    servers_from_cache = refresh_active_servers_cache()
-
-    # Regenerar la lista WRR solo si la caché de servidores ha cambiado
-    # o si ha pasado el TTL de la lista WRR
-    if time.time() - last_wrr_list_update > CACHE_TTL or \
-       len(servers_from_cache) != len(active_servers_cache) or \
-       any(server not in servers_from_cache for server in active_servers_cache): # Comprobación simple de cambio
-        
-        print("Generando la lista de servidores WRR...")
-        new_wrr_list = []
-        for server in servers_from_cache:
-            for _ in range(server['server_weight']):
-                new_wrr_list.append(server)
-        wrr_server_list = new_wrr_list
+    if time.time() - last_wrr_list_update > CACHE_TTL: # Reconstruir lista WRR si expira
+        print("Reconstruyendo la lista WRR...")
+        wrr_server_list = []
+        for s_info in active_servers_cache:
+            weight = s_info.get('server_weight', 1)
+            if weight is None:
+                weight = 1
+            wrr_server_list.extend([s_info] * weight)
         last_wrr_list_update = time.time()
-    return wrr_server_list
+        print(f"Lista WRR reconstruida (longitud: {len(wrr_server_list)})")
 
-@client_requests_bp.route('/get_multicast_stream_info', methods=['GET'])
+
+# --- Funciones de Clientes Multicast ---
+@client_requests_bp.route('/client/get_multicast_stream_info', methods=['GET'])
 def get_multicast_stream_info():
     """
-    Endpoint para que los clientes soliciten información del stream multicast.
-    Aplica el algoritmo de balanceo de carga configurado (RR o WRR).
+    Endpoint para que el cliente solicite información del stream multicast.
+    Selecciona un servidor backend usando balanceo de carga y devuelve la VIP.
     """
-    # Mover la declaración global al inicio de la función
-    global rr_index 
+    global rr_index
 
     try:
-        # Obtener el algoritmo de balanceo de carga actual de la configuración
-        current_config = fetch_one("SELECT algoritmo_balanceo FROM configuracion ORDER BY fecha_activacion DESC LIMIT 1;")
-        algoritmo_balanceo = current_config['algoritmo_balanceo'] if current_config else None
+        refresh_active_servers_cache()
+
+        query_lb_algo = "SELECT algoritmo_balanceo FROM configuracion ORDER BY fecha_activacion DESC LIMIT 1;"
+        config_data = fetch_one(query_lb_algo) # Usar la función fetch_one importada
+        configured_lb_algorithm = config_data['algoritmo_balanceo'] if config_data and config_data['algoritmo_balanceo'] else 'round_robin'
+        print(f"Algoritmo de balanceo de carga configurado: {configured_lb_algorithm}")
 
         selected_server = None
 
-        if algoritmo_balanceo == 'RR':
-            with rr_lock: # Proteger el acceso al índice RR
-                servers = refresh_active_servers_cache()
-                if servers:
-                    selected_server = servers[rr_index % len(servers)]
-                    rr_index = (rr_index + 1) % len(servers) # Incrementar y volver al principio
-                else:
-                    print("No hay servidores activos para Round Robin.")
-        elif algoritmo_balanceo == 'WRR':
-            with rr_lock: # Proteger el acceso al índice WRR
-                servers_wrr = generate_wrr_list()
-                if servers_wrr:
-                    selected_server = servers_wrr[rr_index % len(servers_wrr)]
-                    rr_index = (rr_index + 1) % len(servers_wrr) # Incrementar y volver al principio
-                else:
-                    print("No hay servidores activos para Weighted Round Robin.")
-        else:
-            # Si no hay algoritmo configurado o es desconocido, usar RR por defecto
-            print(f"Algoritmo de balanceo desconocido o no configurado ({algoritmo_balanceo}). Usando Round Robin por defecto.")
-            servers = refresh_active_servers_cache()
-            if servers:
-                with rr_lock:
-                    selected_server = servers[rr_index % len(servers)]
-                    rr_index = (rr_index + 1) % len(servers)
-            else:
-                    print("No hay servidores activos para Round Robin (por defecto).")
+        with rr_lock:
+            if not active_servers_cache:
+                print("No hay servidores activos en la caché.")
+                return jsonify({"error": "No hay servidores activos disponibles para streaming."}), 503
 
+            if configured_lb_algorithm == 'round_robin':
+                if active_servers_cache:
+                    selected_server = active_servers_cache[rr_index % len(active_servers_cache)]
+                    rr_index = (rr_index + 1) % len(active_servers_cache)
+                    print(f"RR: Servidor real seleccionado: {selected_server['host_name']}")
+                else:
+                    print("RR: No hay servidores activos para Round Robin.")
+
+            elif configured_lb_algorithm == 'weighted_round_robin':
+                refresh_wrr_list()
+
+                if wrr_server_list:
+                    selected_server = wrr_server_list[rr_index % len(wrr_server_list)]
+                    rr_index = (rr_index + 1) % len(wrr_server_list)
+                    print(f"WRR: Servidor real seleccionado: {selected_server['host_name']}")
+                else:
+                    print("WRR: No hay servidores activos con pesos válidos para Weighted Round Robin, fallback a Round Robin.")
+                    selected_server = active_servers_cache[rr_index % len(active_servers_cache)]
+                    rr_index = (rr_index + 1) % len(active_servers_cache)
+
+            elif configured_lb_algorithm == 'least_connections':
+                print("Algoritmo 'least_connections' no implementado en la capa de aplicación, usando Round Robin.")
+                selected_server = active_servers_cache[rr_index % len(active_servers_cache)]
+                rr_index = (rr_index + 1) % len(active_servers_cache)
+            else:
+                print(f"Algoritmo '{configured_lb_algorithm}' no reconocido, usando Round Robin.")
+                selected_server = active_servers_cache[rr_index % len(active_servers_cache)]
+                rr_index = (rr_index + 1) % len(active_servers_cache)
 
         if selected_server:
+            print(f"Balanceador: Cliente redirigido a VIP {VIP_IP}:{VIP_PORT} (servidor real seleccionado: {selected_server['host_name']})")
             return jsonify({
                 "host_name": selected_server['host_name'],
-                "multicast_ip": selected_server['ip_destino'],
-                "multicast_port": selected_server['puerto']
+                "multicast_ip": VIP_IP,
+                "multicast_port": VIP_PORT
             }), 200
         else:
             return jsonify({"error": "No hay servidores activos disponibles para streaming."}), 503
@@ -119,14 +130,13 @@ def get_mininet_hosts():
     Endpoint para obtener una lista de hosts disponibles desde la tabla 'hosts' de la base de datos.
     """
     try:
-        query_hosts = "SELECT nombre FROM hosts;" # Selecciona la columna 'nombre'
-        hosts_data = fetch_all(query_hosts) # Ejecuta la consulta a la DB
+        query_hosts = "SELECT nombre FROM hosts;"
+        hosts_data = fetch_all(query_hosts) # Usar la función fetch_all importada
         
-        # Formatea los datos para que coincidan con el formato esperado por el frontend
-        # que es {"hosts": [{"name": "h1_1"}, ...]}
         hosts = [{"name": h['nombre']} for h in hosts_data]
         
         return jsonify({"hosts": hosts}), 200
     except Exception as e:
         print(f"Error al obtener la lista de hosts de la base de datos: {e}")
         return jsonify({"error": f"Error interno del servidor al obtener hosts de la DB: {str(e)}"}), 500
+

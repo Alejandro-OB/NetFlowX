@@ -1,9 +1,6 @@
-// --- Constantes globales para las URLs de la API (asumidas desde index.js) ---
-// const API_BASE_URL = 'http://192.168.18.151:5000'; 
-// const MININET_AGENT_URL = 'http://192.168.18.206:5002';
 
-// Array global para mantener el estado de los clientes FFplay activos
-let activeFFplayClients = [];
+let activeHttpClients = [];
+
 
 // --- Funciones de Clientes Multicast ---
 async function loadMininetHosts() {
@@ -69,147 +66,143 @@ async function loadMininetHosts() {
  * Renderiza o actualiza la tabla de clientes FFplay activos.
  */
 function updateActiveClientsTable() {
-    const tableBody = document.getElementById('active-ffplay-clients-list');
+    const tableBody = document.getElementById('active-http-clients-list');
     tableBody.innerHTML = ''; // Limpiar tabla existente
 
-    if (activeFFplayClients.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">No hay clientes FFplay activos.</td></tr>';
+    if (activeHttpClients.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">No hay solicitudes activas.</td></tr>';
         return;
     }
 
-    activeFFplayClients.forEach(client => {
+    activeHttpClients.forEach(client => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td class="py-2 px-4 border-b border-gray-200">${client.host}</td>
-            <td class="py-2 px-4 border-b border-gray-200">${client.multicastIp}</td>
-            <td class="py-2 px-4 border-b border-gray-200">${client.multicastPort}</td>
-            <td class="py-2 px-4 border-b border-gray-200">${client.ffplayPid || 'N/A'}</td>
+            <td class="py-2 px-4 border-b border-gray-200">${client.server_ip}</td>
+            <td class="py-2 px-4 border-b border-gray-200">${client.port}</td>
+            <td class="py-2 px-4 border-b border-gray-200">${client.video}</td>
             <td class="py-2 px-4 border-b border-gray-200">
-                <button class="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm stop-ffplay-client-btn"
+                <button class="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm stop-http-client-btn"
                     data-host="${client.host}"
-                    data-ffplay-pid="${client.ffplayPid}">Detener</button>
+                    data-video="${client.video}">Detener</button>
             </td>
         `;
         tableBody.appendChild(tr);
     });
 
     // Añadir event listeners a los botones de detener recién creados
-    document.querySelectorAll('.stop-ffplay-client-btn').forEach(button => {
+    document.querySelectorAll('.stop-http-client-btn').forEach(button => {
         button.addEventListener('click', async (event) => {
             const host = event.target.dataset.host;
-            const ffplayPid = event.target.dataset.ffplayPid; // Obtener el PID específico
-            await stopFFmpegClient(host, ffplayPid); // Llamar a la función de detención
+            const video = event.target.dataset.video;
+            await stopHTTPClient(host, video); // Esta función debes definirla para detener la reproducción
         });
     });
 }
 
-/**
- * Inicia un cliente FFplay en un host de Mininet.
- * @param {string} host - Nombre del host cliente.
- * @param {string} multicastIp - IP Multicast del stream.
- * @param {number} multicastPort - Puerto Multicast del stream.
- */
-async function startFFmpegClient(host, multicastIp, multicastPort) {
-    try {
-        const response = await fetch(`${MININET_AGENT_URL}/mininet/start_ffmpeg_client`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                host: host,
-                multicast_ip: multicastIp,
-                puerto: parseInt(multicastPort)
-            })
-        });
-        const data = await response.json();
-        if (response.ok && data.success) {
-            showMessageModal('Éxito', `Cliente FFplay iniciado en ${host} para ${multicastIp}:${multicastPort}`);
-            // Añadir el cliente a la lista de activos
-            activeFFplayClients.push({
-                host: host,
-                multicastIp: multicastIp,
-                multicastPort: multicastPort,
-                ffplayPid: data.ffplay_client_pid // Asegúrate de que el agente devuelva este PID
-            });
-            updateActiveClientsTable(); // Actualizar la tabla
-            loadMininetHosts(); // Volver a cargar la lista de hosts para actualizar el dropdown
-        } else {
-            showMessageModal('Error', `Error al iniciar FFplay: ${data.error || 'Error desconocido'}`);
-        }
-    } catch (error) {
-        console.error('Error iniciando FFplay cliente:', error);
-        showMessageModal('Error', 'Error de conexión al iniciar FFplay cliente.');
-    }
-}
 
-/**
- * Detiene un cliente FFplay específico en un host de Mininet.
- * @param {string} host - Nombre del host cliente.
- * @param {string} ffplayPid - PID del proceso FFplay a detener.
- */
-async function stopFFmpegClient(host, ffplayPid) {
-    showMessageModal('Confirmar Detención', `¿Estás seguro de que quieres detener el cliente FFplay en ${host} (PID: ${ffplayPid})?`, true, async () => {
-        try {
-            const response = await fetch(`${MININET_AGENT_URL}/mininet/stop_ffmpeg_client`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host: host, ffplay_pid: ffplayPid }) // Enviar el PID específico
-            });
-            const data = await response.json();
-            if (response.ok && data.success) {
-                showMessageModal('Éxito', `FFplay detenido en ${host}.`);
-                // Eliminar el cliente de la lista de activos
-                activeFFplayClients = activeFFplayClients.filter(client => client.ffplayPid !== ffplayPid);
-                updateActiveClientsTable(); // <--- ¡Aquí está la llamada que faltaba!
-                loadMininetHosts(); // Volver a cargar la lista de hosts para actualizar el dropdown
-            } else {
-                showMessageModal('Error', `Error al detener FFplay: ${data.error || 'Error desconocido'}`);
-            }
-        } catch (error) {
-            console.error('Error deteniendo FFplay cliente:', error);
-            showMessageModal('Error', 'Error de conexión al detener FFplay cliente.');
-        }
-    });
-}
-
-
-// Event listener para el botón "Solicitar Video Multicast"
 document.getElementById('requestStreamBtn').addEventListener('click', async () => {
-    const clientHost = document.getElementById('clientHost').value;
-    const streamInfoParagraph = document.getElementById('streamInfo');
+  const clientHost = document.getElementById('clientHost').value;
+  const videoFile = document.getElementById('videoFileName').value;
+  const streamInfo = document.getElementById('streamInfo');
 
-    if (!clientHost) {
-        streamInfoParagraph.textContent = 'Por favor, selecciona un host cliente.';
-        streamInfoParagraph.className = 'mt-2 text-sm text-red-600';
-        return;
+  if (!clientHost || !videoFile) {
+    streamInfo.textContent = 'Por favor, selecciona un cliente y escribe el nombre del video.';
+    streamInfo.className = 'mt-2 text-sm text-red-600';
+    return;
+  }
+
+  try {
+    const response = await fetch(`${MININET_AGENT_URL}/mininet/start_http_client`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        host: clientHost,
+        video_file: videoFile
+      })
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      streamInfo.textContent = `Reproducción iniciada en ${clientHost}`;
+      streamInfo.className = 'mt-2 text-sm text-green-600';
+      showMessageModal('Éxito', `El cliente ${clientHost} está reproduciendo ${videoFile}`);
+      
+      // Añadir a la lista local si estás usando una tabla de clientes activos
+      activeHttpClients.push({
+        host: clientHost,
+        video: videoFile,
+        server: '10.0.0.100',
+        port: 8080
+      });
+      updateActiveHttpClientsTable();
+    } else {
+      streamInfo.textContent = `Error al iniciar cliente: ${data.error || 'Desconocido'}`;
+      streamInfo.className = 'mt-2 text-sm text-red-600';
     }
 
-    // Verificar si el host ya está en la lista de clientes activos (para evitar duplicados)
-    if (activeFFplayClients.some(client => client.host === clientHost)) {
-        showMessageModal('Advertencia', `El host ${clientHost} ya tiene un cliente FFplay activo.`);
-        return;
-    }
-
-    try {
-        const response = await fetch(`${API_BASE_URL}/client/get_multicast_stream_info`);
-        const data = await response.json();
-
-        if (response.ok && data.multicast_ip && data.multicast_port) {
-            streamInfoParagraph.textContent = `Asignado al servidor: ${data.host_name}. IP Multicast: ${data.multicast_ip}:${data.multicast_port}. Iniciando cliente FFplay...`;
-            streamInfoParagraph.className = 'mt-2 text-sm text-green-600';
-            
-            // Iniciar FFplay automáticamente después de obtener la info del stream
-            await startFFmpegClient(clientHost, data.multicast_ip, data.multicast_port);
-
-        } else {
-            streamInfoParagraph.textContent = `Error: ${data.error || 'No se pudo obtener información del stream.'}`;
-            streamInfoParagraph.className = 'mt-2 text-sm text-red-600';
-        }
-    } catch (error) {
-        console.error('Error solicitando información del stream:', error);
-        streamInfoParagraph.textContent = 'Error de conexión al solicitar información del stream.';
-        streamInfoParagraph.className = 'mt-2 text-sm text-red-600';
-    }
+  } catch (error) {
+    console.error('Error al iniciar cliente HTTP:', error);
+    streamInfo.textContent = 'Error de conexión con el agente.';
+    streamInfo.className = 'mt-2 text-sm text-red-600';
+  }
 });
+
+
+
+async function stopHttpClient(host) {
+  try {
+    const response = await fetch(`${MININET_AGENT_URL}/mininet/stop_http_client`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: host })
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      showMessageModal('Éxito', `Cliente FFplay detenido en ${host}.`);
+      // Eliminarlo de la lista local y actualizar la tabla si tienes una estructura así
+      activeHttpClients = activeHttpClients.filter(client => client.host !== host);
+      updateActiveHttpClientsTable();
+      loadMininetHosts();
+    } else {
+      showMessageModal('Error', `No se pudo detener el cliente: ${data.error || 'Desconocido'}`);
+    }
+  } catch (error) {
+    console.error('Error deteniendo cliente HTTP:', error);
+    showMessageModal('Error', 'Error de conexión con el agente al detener el cliente.');
+  }
+}
+
+
+
+
+
+function updateActiveHttpClientsTable() {
+  const tableBody = document.getElementById('active-http-clients-list');
+  tableBody.innerHTML = '';
+
+  if (activeHttpClients.length === 0) {
+    tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">No hay solicitudes activas.</td></tr>';
+    return;
+  }
+
+  activeHttpClients.forEach(client => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="py-2 px-4 border-b border-gray-200">${client.host}</td>
+      <td class="py-2 px-4 border-b border-gray-200">${client.serverIp}</td>
+      <td class="py-2 px-4 border-b border-gray-200">${client.port}</td>
+      <td class="py-2 px-4 border-b border-gray-200">${client.video}</td>
+      <td class="py-2 px-4 border-b border-gray-200">
+        <button class="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm" onclick="stopHttpClient('${client.host}')">Detener</button>
+      </td>
+    `;
+    tableBody.appendChild(tr);
+  });
+}
 
 
 // --- Inicialización ---
