@@ -11,37 +11,39 @@ def get_topology():
     Endpoint para obtener la información completa de la topología (switches, hosts, enlaces).
     """
     try:
-        switches_data = fetch_all("SELECT id_switch, nombre, switch_label AS dpid, latitud, longitud FROM switches;")        
+        # Modificación clave: Añadir 'status' a la selección
+        switches_data = fetch_all("SELECT id_switch, nombre, switch_label AS dpid, latitud, longitud, status FROM switches;")
         formatted_switches = []
-        switches_by_id = {} 
+        switches_by_id = {}
 
         if switches_data:
             for sw in switches_data:
                 lat = float(sw['latitud']) if sw['latitud'] is not None else None
                 lon = float(sw['longitud']) if sw['longitud'] is not None else None
-                
+
                 formatted_sw_entry = {
-                    'id_switch': sw['id_switch'], 
+                    'id_switch': sw['id_switch'],
                     'nombre': sw['nombre'],
-                    'dpid': sw['dpid'], 
+                    'dpid': sw['dpid'],
                     'latitud': lat,
-                    'longitud': lon
+                    'longitud': lon,
+                    'status': sw['status']  # Incluir el estado
                 }
                 formatted_switches.append(formatted_sw_entry)
-                switches_by_id[sw['id_switch']] = formatted_sw_entry 
+                switches_by_id[sw['id_switch']] = formatted_sw_entry
 
         hosts_data = fetch_all("SELECT id_host, nombre, mac, ipv4 AS ip, switch_asociado AS id_switch_conectado FROM hosts;")
-        if hosts_data is None: 
+        if hosts_data is None:
             hosts_data = []
 
         enlaces_raw_data = fetch_all("""
-            SELECT s1.nombre AS origen_nombre, s2.nombre AS destino_nombre, 
+            SELECT s1.nombre AS origen_nombre, s2.nombre AS destino_nombre,
                    e.id_origen, e.id_destino, e.ancho_banda
             FROM enlaces e
             JOIN switches s1 ON e.id_origen = s1.id_switch
             JOIN switches s2 ON e.id_destino = s2.id_switch;
         """)
-        
+
         formatted_enlaces = []
         if enlaces_raw_data:
             for enlace in enlaces_raw_data:
@@ -51,12 +53,12 @@ def get_topology():
                 if origen_switch and destino_switch and \
                    origen_switch['latitud'] is not None and origen_switch['longitud'] is not None and \
                    destino_switch['latitud'] is not None and destino_switch['longitud'] is not None:
-                    
+
                     formatted_enlaces.append({
                         'origen_nombre': enlace['origen_nombre'],
                         'destino_nombre': enlace['destino_nombre'],
-                        'id_origen': enlace['id_origen'], 
-                        'id_destino': enlace['id_destino'], 
+                        'id_origen': enlace['id_origen'],
+                        'id_destino': enlace['id_destino'],
                         'ancho_banda': enlace['ancho_banda']
                     })
                 else:
@@ -67,13 +69,12 @@ def get_topology():
             "hosts": hosts_data,
             "enlaces": formatted_enlaces
         }
-        
+
         return jsonify(response_data), 200
 
     except Exception as e:
         print(f"Error en get_topology: {e}")
         return jsonify({"error": "Error interno del servidor al obtener la topología: " + str(e)}), 500
-
 @topology_bp.route('/enlace', methods=['POST'])
 def create_enlace():
     """

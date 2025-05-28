@@ -1,6 +1,3 @@
-// --- Constantes globales para las URLs de la API (asumidas desde index.js) ---
-// const API_BASE_URL = 'http://192.168.18.151:5000'; 
-// const MININET_AGENT_URL = 'http://192.168.18.206:5002';
 
 // Array global para mantener el estado de los clientes FFplay activos
 let activeFFplayClients = [];
@@ -68,40 +65,55 @@ async function loadMininetHosts() {
 /**
  * Renderiza o actualiza la tabla de clientes FFplay activos.
  */
-function updateActiveClientsTable() {
+async function updateActiveClientsTable() {
     const tableBody = document.getElementById('active-ffplay-clients-list');
     tableBody.innerHTML = ''; // Limpiar tabla existente
 
-    if (activeFFplayClients.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">No hay clientes FFplay activos.</td></tr>';
-        return;
-    }
+    try {
+        const response = await fetch(`${API_BASE_URL}/client/active_clients`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        const activeClients = data.active_clients || [];
 
-    activeFFplayClients.forEach(client => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="py-2 px-4 border-b border-gray-200">${client.host}</td>
-            <td class="py-2 px-4 border-b border-gray-200">${client.multicastIp}</td>
-            <td class="py-2 px-4 border-b border-gray-200">${client.multicastPort}</td>
-            <td class="py-2 px-4 border-b border-gray-200">${client.ffplayPid || 'N/A'}</td>
-            <td class="py-2 px-4 border-b border-gray-200">
-                <button class="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm stop-ffplay-client-btn"
-                    data-host="${client.host}"
-                    data-ffplay-pid="${client.ffplayPid}">Detener</button>
-            </td>
-        `;
-        tableBody.appendChild(tr);
-    });
+        if (activeClients.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">No hay clientes activos.</td></tr>';
+            return;
+        }
 
-    // Añadir event listeners a los botones de detener recién creados
-    document.querySelectorAll('.stop-ffplay-client-btn').forEach(button => {
-        button.addEventListener('click', async (event) => {
-            const host = event.target.dataset.host;
-            const ffplayPid = event.target.dataset.ffplayPid; // Obtener el PID específico
-            await stopFFmpegClient(host, ffplayPid); // Llamar a la función de detención
+        activeClients.forEach(client => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="py-2 px-4 border-b">${client.host}</td>
+                <td class="py-2 px-4 border-b">${client.server_display_name || 'N/A'}</td>
+                <td class="py-2 px-4 border-b">${client.ip_destino_raw || 'N/A'}</td>
+                <td class="py-2 px-4 border-b">${client.port || 'N/A'}</td>
+                <td class="py-2 px-4 border-b">${client.video}</td>
+                <td class="py-2 px-4 border-b">${client.timestamp_inicio || '-'}</td>
+                <td class="py-2 px-4 border-b">
+                    <button class="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm stop-ffplay-client-btn"
+                        data-host="${client.host}">Detener</button>
+                </td>
+            `;
+            tableBody.appendChild(tr);
         });
-    });
+
+        // Listeners para los botones de "Detener"
+        document.querySelectorAll('.stop-ffplay-client-btn').forEach(button => {
+            button.addEventListener('click', async (event) => {
+                const host = event.target.dataset.host;
+                // Opcionalmente podrías pedir confirmación
+                await stopFFmpegClient(host, null); // Debes modificar stopFFmpegClient para aceptar solo el host
+            });
+        });
+
+    } catch (error) {
+        console.error('Error al cargar clientes activos desde la base de datos:', error);
+        tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-red-600">Error al cargar datos.</td></tr>';
+    }
 }
+
 
 /**
  * Inicia un cliente FFplay en un host de Mininet.
@@ -109,7 +121,8 @@ function updateActiveClientsTable() {
  * @param {string} multicastIp - IP Multicast del stream.
  * @param {number} multicastPort - Puerto Multicast del stream.
  */
-async function startFFmpegClient(host, multicastIp, multicastPort) {
+async function startFFmpegClient(host, streamInfo) {
+    const { multicastIp, multicastPort, serverName } = streamInfo;
     try {
         const response = await fetch(`${MININET_AGENT_URL}/mininet/start_ffmpeg_client`, {
             method: 'POST',
@@ -123,15 +136,29 @@ async function startFFmpegClient(host, multicastIp, multicastPort) {
         const data = await response.json();
         if (response.ok && data.success) {
             showMessageModal('Éxito', `Cliente FFplay iniciado en ${host} para ${multicastIp}:${multicastPort}`);
-            // Añadir el cliente a la lista de activos
-            activeFFplayClients.push({
-                host: host,
-                multicastIp: multicastIp,
-                multicastPort: multicastPort,
-                ffplayPid: data.ffplay_client_pid // Asegúrate de que el agente devuelva este PID
+
+
+            await updateHostClientStatus(host, true);
+
+            console.log('Valores a enviar a la BD:', {
+                host,
+                multicastIp,
+                multicastPort,
+                videoFile: 'stream_multicast',
+                serverName
             });
-            updateActiveClientsTable(); // Actualizar la tabla
-            loadMininetHosts(); // Volver a cargar la lista de hosts para actualizar el dropdown
+
+            if (!serverName || !multicastIp || !multicastPort) {
+                console.error("❌ Datos incompletos del servidor:", streamInfo);
+                showMessageModal("Error", "La información del servidor asignado está incompleta.");
+                return;
+            }
+
+            await addActiveClientToDB(host, multicastIp, multicastPort, 'stream_multicast', serverName);
+            loadActiveClientsFromDB();
+            
+            //updateActiveClientsTable();
+            loadMininetHosts();
         } else {
             showMessageModal('Error', `Error al iniciar FFplay: ${data.error || 'Error desconocido'}`);
         }
@@ -141,26 +168,34 @@ async function startFFmpegClient(host, multicastIp, multicastPort) {
     }
 }
 
+
+
 /**
  * Detiene un cliente FFplay específico en un host de Mininet.
  * @param {string} host - Nombre del host cliente.
  * @param {string} ffplayPid - PID del proceso FFplay a detener.
  */
-async function stopFFmpegClient(host, ffplayPid) {
-    showMessageModal('Confirmar Detención', `¿Estás seguro de que quieres detener el cliente FFplay en ${host} (PID: ${ffplayPid})?`, true, async () => {
+async function stopFFmpegClient(host, ffplayPid = null) {
+    const confirmMessage = `¿Deseas detener el cliente FFplay en ${host}${ffplayPid ? ` (PID: ${ffplayPid})` : ''}?`;
+    showMessageModal('Confirmar Detención', confirmMessage, true, async () => {
         try {
+            const payload = { host: host };
+            if (ffplayPid) {
+                payload.ffplay_pid = ffplayPid;
+            }
+
             const response = await fetch(`${MININET_AGENT_URL}/mininet/stop_ffmpeg_client`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host: host, ffplay_pid: ffplayPid }) // Enviar el PID específico
+                body: JSON.stringify(payload)
             });
             const data = await response.json();
             if (response.ok && data.success) {
                 showMessageModal('Éxito', `FFplay detenido en ${host}.`);
-                // Eliminar el cliente de la lista de activos
-                activeFFplayClients = activeFFplayClients.filter(client => client.ffplayPid !== ffplayPid);
-                updateActiveClientsTable(); // <--- ¡Aquí está la llamada que faltaba!
-                loadMininetHosts(); // Volver a cargar la lista de hosts para actualizar el dropdown
+                await updateHostClientStatus(host, false);
+                await removeActiveClientFromDB(host);
+                updateActiveClientsTable();
+                loadMininetHosts();
             } else {
                 showMessageModal('Error', `Error al detener FFplay: ${data.error || 'Error desconocido'}`);
             }
@@ -170,6 +205,7 @@ async function stopFFmpegClient(host, ffplayPid) {
         }
     });
 }
+
 
 
 // Event listener para el botón "Solicitar Video Multicast"
@@ -193,15 +229,23 @@ document.getElementById('requestStreamBtn').addEventListener('click', async () =
         const response = await fetch(`${API_BASE_URL}/client/get_multicast_stream_info`);
         const data = await response.json();
 
-        if (response.ok && data.multicast_ip && data.multicast_port) {
+        if (response.ok && data.host_name && data.multicast_ip && data.multicast_port) {
             streamInfoParagraph.textContent = `Asignado al servidor: ${data.host_name}. IP Multicast: ${data.multicast_ip}:${data.multicast_port}. Iniciando cliente FFplay...`;
             streamInfoParagraph.className = 'mt-2 text-sm text-green-600';
-            
-            // Iniciar FFplay automáticamente después de obtener la info del stream
-            await startFFmpegClient(clientHost, data.multicast_ip, data.multicast_port);
+
+            // Crear objeto con la información del stream
+            const streamInfo = {
+                serverName: data.host_name,
+                multicastIp: data.multicast_ip,
+                multicastPort: data.multicast_port
+            };
+
+            // Iniciar cliente FFplay con toda la info del servidor
+            await startFFmpegClient(clientHost, streamInfo);
 
         } else {
-            streamInfoParagraph.textContent = `Error: ${data.error || 'No se pudo obtener información del stream.'}`;
+            console.error("❌ Datos incompletos del backend:", data);
+            streamInfoParagraph.textContent = `Error: No se pudo obtener información completa del servidor.`;
             streamInfoParagraph.className = 'mt-2 text-sm text-red-600';
         }
     } catch (error) {
@@ -212,10 +256,128 @@ document.getElementById('requestStreamBtn').addEventListener('click', async () =
 });
 
 
+async function updateActiveClientsDashboard() {
+    const dashboardListDiv = document.getElementById('active-http-clients-dashboard-list');
+    dashboardListDiv.innerHTML = ''; // Limpiar contenido previo
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/client/active_clients`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const activeClients = data.active_clients || [];
+
+        if (activeClients.length === 0) {
+            dashboardListDiv.textContent = 'No hay clientes activos.';
+            return;
+        }
+
+        const ul = document.createElement('ul');
+        ul.className = 'list-disc list-inside';
+
+        activeClients.forEach(client => {
+            const li = document.createElement('li');
+            li.textContent = `Cliente: ${client.host} - Servidor: ${client.server_display_name || client.server_ip}`;
+            ul.appendChild(li);
+        });
+
+        dashboardListDiv.appendChild(ul);
+
+    } catch (error) {
+        console.error('Error al cargar el dashboard de clientes activos desde la BD:', error);
+        dashboardListDiv.textContent = 'Error al cargar clientes activos.';
+    }
+}
+
+
+
+async function addActiveClientToDB(host, serverIp, port, videoFile, serverName) {
+    if (!host || !serverIp || !port || !videoFile || !serverName) {
+        console.error("❌ Parámetros incompletos para guardar en BD:", { host, serverIp, port, videoFile, serverName });
+        return;
+    }
+    try {
+        const response = await fetch(`${API_BASE_URL}/client/add_active_client`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                host: host,
+                server_ip: serverIp,
+                port: port,
+                video_file: videoFile,
+                server_name: serverName
+            })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            console.error(`❌ Error al añadir cliente activo a la DB para ${host}: ${data.error || 'Desconocido'}`);
+        }
+    } catch (error) {
+        console.error(`❌ Error de conexión al añadir cliente activo a la DB para ${host}:`, error);
+    }
+}
+
+
+
+async function removeActiveClientFromDB(host) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/client/remove_active_client`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host: host })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            console.error(`Error al eliminar cliente activo de la DB para ${host}: ${data.error || 'Desconocido'}`);
+        }
+    } catch (error) {
+        console.error(`Error de conexión al eliminar cliente activo de la DB para ${host}:`, error);
+    }
+}
+
+async function updateHostClientStatus(hostName, isClient) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/client/update_client_status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host_name: hostName, is_client: isClient })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            console.error(`Error al actualizar es_cliente para ${hostName}: ${data.error || 'Desconocido'}`);
+        }
+    } catch (error) {
+        console.error(`Error de conexión al actualizar es_cliente para ${hostName}:`, error);
+    }
+}
+
+async function loadActiveClientsFromDB() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/client/active_clients`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        if (data.active_clients) {
+            activeFFplayClients = data.active_clients;
+        } else {
+            activeFFplayClients = [];
+        }
+        updateActiveClientsTable();
+        updateActiveClientsDashboard();
+    } catch (error) {
+        console.error('Error cargando clientes activos desde la DB:', error);
+        showMessageModal('Error', 'No se pudieron cargar los clientes activos: ' + error.message);
+    }
+}
+
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
     loadMininetHosts(); // Cargar hosts al inicio
-    updateActiveClientsTable(); // Inicializar la tabla de clientes activos
+    updateActiveClientsTable(); 
+    updateActiveClientsDashboard();// Inicializar la tabla de clientes activos
     // Refrescar la lista de servidores periódicamente si es necesario para el dashboard
-    // setInterval(loadActiveServers, 10000); 
+    setInterval(updateActiveClientsTable, 10000); 
 });

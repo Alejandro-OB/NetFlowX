@@ -2,15 +2,10 @@ from flask import Blueprint, jsonify, request
 import subprocess
 import re
 import os
-import atexit # Para limpiar procesos al cerrar la aplicación
-import signal # Para manejar señales de terminación y limpiar
-import psycopg2 # Para interactuar con la base de datos PostgreSQL
-import time # Para pausas si es necesario
-import requests # Para hacer solicitudes HTTP al agente de Mininet
-from datetime import datetime # ¡CORRECCIÓN: Importar datetime!
+import requests 
+from datetime import datetime 
 
-# Importa las funciones de la base de datos desde services.db
-# Asegúrate de que 'services/db.py' exista y contenga 'fetch_all' y 'execute_query'
+
 from services.db import fetch_all, execute_query, fetch_one # Añadido fetch_one
 
 servers_bp = Blueprint('servers', __name__)
@@ -20,21 +15,19 @@ DB_CONFIG = {
     "dbname": os.getenv("DB_NAME", "geant_network"),
     "user": os.getenv("DB_USER", "geant_user"),
     "password": os.getenv("DB_PASSWORD", "geant"),
-    "host": os.getenv("DB_HOST", "192.168.18.151"), # IP de tu servidor PostgreSQL
+    "host": os.getenv("DB_HOST", "192.168.18.151"), # IP PostgreSQL
     "port": os.getenv("DB_PORT", "5432")
 }
 
-MININET_AGENT_URL = os.getenv("MININET_AGENT_URL", "http://192.168.18.206:5002") # Ejemplo: IP de la máquina de Mininet
+MININET_AGENT_URL = os.getenv("MININET_AGENT_URL", "http://192.168.18.208:5002") #IP de la máquina de Mininet
 
 video_processes = {} # { "h1_1": {"video_path": "/path/to/video.mp4", "ip_destino": "10.0.0.2", "puerto": 5004, "status": "activo"} }
 
 # --- Lógica de asignación de IP Multicast ---
-# Pool de IPs multicast. Se recomienda un rango dentro de 224.0.0.0/4 (224.0.0.0 a 239.255.255.255)
-# Usaremos un rango privado administrativamente scoped para evitar conflictos en redes reales
-# 239.0.0.0/8 es un buen rango para uso privado
-MULTICAST_IP_POOL_START = 0xEF000001 # 239.0.0.1
+# Pool de IPs multicast para asignar a los servidores VLC
+MULTICAST_IP_POOL_START = 0xEF000001 
 NEXT_MULTICAST_IP_INDEX = 0
-ALLOCATED_MULTICAST_IPS = {} # {host_name: '239.0.0.X'}
+ALLOCATED_MULTICAST_IPS = {} 
 
 def get_next_multicast_ip():
     """
@@ -49,7 +42,7 @@ def get_next_multicast_ip():
     # Convertir el entero a formato IP (ej. 239.0.0.1)
     return f"{((base_ip >> 24) & 0xFF)}.{(base_ip >> 16) & 0xFF}.{(base_ip >> 8) & 0xFF}.{(base_ip & 0xFF)}"
 
-# No necesitamos get_host_pid aquí, eso es para el agente.
+
 
 @servers_bp.route('/add', methods=['POST'])
 def iniciar_servidor_hosts_table():
@@ -66,11 +59,10 @@ def iniciar_servidor_hosts_table():
 
     try:
         # Asignar una IP y puerto multicast
-        # Se podría buscar una IP ya asignada si el host ya existe en la tabla
         existing_server = fetch_one("SELECT ip_destino, puerto FROM servidores_vlc_activos WHERE host_name = %s;", (host_name,))
         
         multicast_ip = None
-        multicast_port = 5004 # Puerto multicast fijo, o podría ser dinámico
+        multicast_port = 5004 # Puerto multicast 
 
         if existing_server:
             multicast_ip = existing_server['ip_destino']
@@ -95,7 +87,7 @@ def iniciar_servidor_hosts_table():
         """
         # execute_query devuelve el resultado de RETURNING si se usa
         result = execute_query(query_vlc, (host_name, video_path, multicast_ip, multicast_port, server_weight))
-        ok_vlc = result is not None # Verificar si la operación fue exitosa
+        ok_vlc = result is not None 
 
         if not ok_vlc:
             return jsonify({"error": "No se pudo actualizar/insertar en la tabla de servidores VLC activos."}), 500
@@ -123,7 +115,6 @@ def iniciar_servidor_hosts_table():
                     return jsonify({"message": "Servidor activado y FFmpeg iniciado.", "multicast_ip": multicast_ip, "multicast_port": multicast_port}), 200
                 else:
                     print(f"Advertencia: Agente reportó fallo al iniciar FFmpeg en {host_name}: {agent_response.get('message')}. Detalles: {agent_response.get('details')}")
-                    # Considerar revertir la DB o marcar el servidor como 'error'
                     return jsonify({"error": f"Agente falló al iniciar FFmpeg: {agent_response.get('message')}"}), 500
             else:
                 print(f"Advertencia: No se pudo conectar/iniciar FFmpeg en el agente para {host_name}. Estado: {response_agent.status_code}, Respuesta: {response_agent.text}")

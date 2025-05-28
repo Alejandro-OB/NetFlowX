@@ -1,6 +1,6 @@
 // --- Global Constants for API URLs ---
 const API_BASE_URL = 'http://192.168.18.151:5000'; 
-const MININET_AGENT_URL = 'http://192.168.18.206:5002'; // For Mininet agent calls
+const MININET_AGENT_URL = 'http://192.168.18.208:5002'; // For Mininet agent calls
 
 // --- Centralized Message Modal Functions ---
 // This function replaces alert/confirm and is used by all JS modules
@@ -170,7 +170,7 @@ async function updateDashboard() {
     try {
         // Get active server count
         const serversResponse = await fetch(`${API_BASE_URL}/servers/active_servers`);
-        
+
         // Check if the HTTP response was successful
         if (!serversResponse.ok) {
             const errorData = await serversResponse.json().catch(() => ({ message: 'Unknown error' }));
@@ -179,11 +179,11 @@ async function updateDashboard() {
 
         const serversData = await serversResponse.json();
         document.getElementById('active-servers-count').textContent = serversData.length;
-        
+
 
         // Get current load balancing algorithm
         const configResponse = await fetch(`${API_BASE_URL}/config/current`);
-        
+
         // Check if the HTTP response was successful
         if (!configResponse.ok) {
             const errorData = await configResponse.json().catch(() => ({ message: 'Unknown error' }));
@@ -194,12 +194,54 @@ async function updateDashboard() {
         document.getElementById('current-lb-algo').textContent = configData.algoritmo_balanceo || 'Not configured';
         document.getElementById('current-routing-algo').textContent = configData.algoritmo_enrutamiento || 'Not configured';
 
+        // Lógica para mostrar/ocultar el input de peso del servidor para WRR
+        const serverWeightInputGroup = document.getElementById('server-weight-input-group');
+        if (serverWeightInputGroup) { // Asegúrate de que el elemento existe antes de intentar manipularlo
+            if (configData.algoritmo_balanceo === 'weighted_round_robin') {
+                serverWeightInputGroup.classList.remove('hidden');
+            } else {
+                serverWeightInputGroup.classList.add('hidden');
+            }
+        }
+
+        // Update controller status based on switch connectivity
+        await updateControllerStatus();
+
     } catch (error) {
         console.error('Error updating dashboard:', error);
         showMessageModal('Error', 'Could not update dashboard: ' + error.message);
     }
 }
 
+async function updateControllerStatus() {
+    const controllerStatusElement = document.getElementById('controller-status');
+    try {
+        const response = await fetch(`${API_BASE_URL}/topology/get`);
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+            throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || response.statusText}`);
+        }
+        const data = await response.json();
+        const switches = data.switches || [];
+
+        let isConnected = false;
+        if (switches.length > 0) {
+            isConnected = switches.some(s => s.status === 'conectado');
+        }
+
+        if (isConnected) {
+            controllerStatusElement.textContent = 'Conectado';
+            controllerStatusElement.className = 'text-green-700'; // Green for connected
+        } else {
+            controllerStatusElement.textContent = 'Desconectado';
+            controllerStatusElement.className = 'text-red-700'; // Red for disconnected
+        }
+    } catch (error) {
+        console.error('Error updating controller status:', error);
+        controllerStatusElement.textContent = 'Error de Conexión';
+        controllerStatusElement.className = 'text-red-700'; // Red for error
+    }
+}
 // --- Configuration Functions ---
 async function loadConfigHistory() {
     try {

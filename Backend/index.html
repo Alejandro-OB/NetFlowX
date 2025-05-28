@@ -37,7 +37,7 @@
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <div class="bg-blue-50 p-4 rounded-lg shadow-sm">
           <h2 class="text-lg font-semibold text-blue-700">Estado del Controlador</h2>
-          <p class="text-gray-700">Conectado</p>
+          <p id="controller-status" class="text-gray-700">Cargando...</p>
         </div>
         <div class="bg-green-50 p-4 rounded-lg shadow-sm">
           <h2 class="text-lg font-semibold text-green-700">Servidores Activos</h2>
@@ -50,6 +50,10 @@
         <div class="bg-purple-50 p-4 rounded-lg shadow-sm">
           <h2 class="text-lg font-semibold text-purple-700">Algoritmo de Enrutamiento</h2>
           <p id="current-routing-algo" class="text-gray-700">Cargando...</p>
+        </div>
+        <div class="bg-indigo-50 p-4 rounded-lg shadow-sm">
+          <h2 class="text-lg font-semibold text-indigo-700">Clientes Activos</h2>
+          <div id="active-http-clients-dashboard-list" class="text-gray-700">Cargando clientes...</div>
         </div>
       </div>
     </section>
@@ -104,8 +108,7 @@
             <label for="server-video-path" class="block text-sm font-medium text-gray-700">Ruta del Video (en el host):</label>
             <input type="text" id="server-video-path" class="mt-1 block w-full p-2 border border-gray-300 rounded-md" placeholder="ej. /home/mininet/video.mp4">
           </div>
-          <div>
-            <label for="server-weight" class="block text-sm font-medium text-gray-700">Peso del Servidor (para WRR):</label>
+          <div id="server-weight-input-group" class="hidden w-full max-w-sm"> <label for="server-weight" class="block text-sm font-medium text-gray-700 text-left">Peso del Servidor (para WRR):</label>
             <input type="number" id="server-weight" class="mt-1 block w-full p-2 border border-gray-300 rounded-md" value="1" min="1">
           </div>
         </div>
@@ -136,18 +139,21 @@
             <table class="min-w-full bg-white">
               <thead>
                 <tr>
-                  <th class="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Host Cliente</th>
-                  <th class="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">IP Multicast</th>
-                  <th class="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Puerto</th>
-                  <th class="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">PID FFplay</th>
-                  <th class="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Acción</th>
+                  <th class="py-2 px-4 border-b bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase">Host Cliente</th>
+                  <th class="py-2 px-4 border-b bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase">Servidor Asignado</th>
+                  <th class="py-2 px-4 border-b bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase">IP Multicast</th>
+                  <th class="py-2 px-4 border-b bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase">Puerto</th>
+                  <th class="py-2 px-4 border-b bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase">Video</th>
+                  <th class="py-2 px-4 border-b bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase">Inicio</th>
+                  <th class="py-2 px-4 border-b bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase">Acción</th>
                 </tr>
               </thead>
               <tbody id="active-ffplay-clients-list" class="divide-y divide-gray-200">
-                <tr><td colspan="5" class="text-center py-4 text-gray-500">No hay clientes FFplay activos.</td></tr>
+                <tr><td colspan="7" class="text-center py-4 text-gray-500">No hay clientes FFplay activos.</td></tr>
               </tbody>
             </table>
           </div>
+
 
       </div>
     </section>

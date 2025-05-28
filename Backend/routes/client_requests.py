@@ -1,8 +1,9 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from services.db import fetch_all, fetch_one
 import threading
 import time
 from datetime import datetime # Importar datetime para el formato de fecha
+from services.db import execute_query
 
 client_requests_bp = Blueprint('client_requests', __name__)
 
@@ -72,7 +73,7 @@ def get_multicast_stream_info():
 
         selected_server = None
 
-        if algoritmo_balanceo == 'RR':
+        if algoritmo_balanceo == 'round_robin':
             with rr_lock: # Proteger el acceso al índice RR
                 servers = refresh_active_servers_cache()
                 if servers:
@@ -80,7 +81,7 @@ def get_multicast_stream_info():
                     rr_index = (rr_index + 1) % len(servers) # Incrementar y volver al principio
                 else:
                     print("No hay servidores activos para Round Robin.")
-        elif algoritmo_balanceo == 'WRR':
+        elif algoritmo_balanceo == 'weighted_round_robin':
             with rr_lock: # Proteger el acceso al índice WRR
                 servers_wrr = generate_wrr_list()
                 if servers_wrr:
@@ -130,3 +131,88 @@ def get_mininet_hosts():
     except Exception as e:
         print(f"Error al obtener la lista de hosts de la base de datos: {e}")
         return jsonify({"error": f"Error interno del servidor al obtener hosts de la DB: {str(e)}"}), 500
+
+@client_requests_bp.route('/update_client_status', methods=['POST'])
+def update_client_status():
+    data = request.get_json()
+    host_name = data.get('host_name')
+    is_client = data.get('is_client')
+
+    if not host_name or is_client is None:
+        return jsonify({"error": "Host name and client status are required."}), 400
+
+    try:
+        sql_is_client = 'TRUE' if is_client else 'FALSE'
+        update_query = "UPDATE hosts SET es_cliente = %s WHERE nombre = %s;"
+        execute_query(update_query, (sql_is_client, host_name))
+        return jsonify({"success": True, "message": f"Estado de {host_name} actualizado a es_cliente={is_client}"}), 200
+    except Exception as e:
+        return jsonify({"error": f"Error al actualizar es_cliente: {str(e)}"}), 500
+
+@client_requests_bp.route('/add_active_client', methods=['POST'])
+def add_active_client():
+    """
+    Añade un cliente a la tabla clientes_activos con información completa.
+    """
+    data = request.get_json()
+    host_cliente = data.get('host')
+    servidor_asignado = data.get('server_name')
+    ip_destino = data.get('server_ip')
+    puerto = data.get('port')
+    video_solicitado = data.get('video_file')
+
+    if not all([host_cliente, servidor_asignado, ip_destino, puerto, video_solicitado]):
+        return jsonify({"error": "Faltan datos requeridos para añadir cliente activo."}), 400
+
+    try:
+        timestamp_inicio = datetime.now().isoformat()
+        hora_asignacion = datetime.now().isoformat()
+
+
+        insert_query = """
+            INSERT INTO clientes_activos 
+            (host_cliente, servidor_asignado, ip_destino, puerto, video_solicitado, timestamp_inicio, estado, hora_asignacion)
+            VALUES (%s, %s, %s, %s, %s, %s, 'activo', %s);
+        """
+        execute_query(insert_query, (
+            host_cliente, servidor_asignado, ip_destino, puerto, video_solicitado, timestamp_inicio, hora_asignacion
+        ))
+
+        return jsonify({"success": True, "message": f"Cliente {host_cliente} añadido a clientes_activos."}), 201
+    except Exception as e:
+        return jsonify({"error": f"Error al insertar cliente activo: {str(e)}"}), 500
+
+
+@client_requests_bp.route('/remove_active_client', methods=['POST'])
+def remove_active_client():
+    data = request.get_json()
+    host_cliente = data.get('host')
+
+    if not host_cliente:
+        return jsonify({"error": "Host cliente requerido."}), 400
+
+    try:
+        delete_query = "DELETE FROM clientes_activos WHERE host_cliente = %s;"
+        execute_query(delete_query, (host_cliente,))
+        return jsonify({"success": True, "message": f"Cliente {host_cliente} eliminado."}), 200
+    except Exception as e:
+        return jsonify({"error": f"Error al eliminar cliente activo: {str(e)}"}), 500
+
+@client_requests_bp.route('/active_clients', methods=['GET'])
+def get_active_clients():
+    try:
+        query = "SELECT host_cliente, servidor_asignado, ip_destino, puerto, video_solicitado FROM clientes_activos;"
+        clients_data = fetch_all(query)
+        active_clients = [
+            {
+                "host": c['host_cliente'],
+                "server_display_name": c['servidor_asignado'],
+                "ip_destino_raw": c['ip_destino'],
+                "port": c['puerto'],
+                "video": c['video_solicitado']
+            }
+            for c in clients_data
+        ]
+        return jsonify({"active_clients": active_clients}), 200
+    except Exception as e:
+        return jsonify({"error": f"Error al obtener clientes activos: {str(e)}"}), 500
