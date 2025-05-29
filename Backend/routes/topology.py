@@ -168,3 +168,21 @@ def delete_enlace():
     except Exception as e:
         print(f"Error al eliminar enlace: {e}")
         return jsonify({"error": "Error interno del servidor al eliminar el enlace: " + str(e)}), 500
+
+@topology_bp.route('/rutas/ultima', methods=['GET'])
+def obtener_ultima_ruta():
+    src = request.args.get('src')
+    dst = request.args.get('dst')
+    if not src or not dst:
+        return jsonify({"error": "Faltan parámetros src o dst"}), 400
+
+    row = fetch_one("""
+        SELECT ruta FROM rutas 
+        WHERE src_ip = %s AND dst_ip = %s 
+        ORDER BY timestamp DESC LIMIT 1
+    """, (src, dst))
+
+    if row:
+        return jsonify({"ruta": row["ruta"]})
+    else:
+        return jsonify({"ruta": []})

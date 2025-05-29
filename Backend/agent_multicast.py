@@ -272,6 +272,71 @@ def stop_ffmpeg_client_on_host():
         print(f"Agente: Información incompleta para detener FFplay cliente para {host}.")
         return jsonify({"error": f"Información incompleta para detener FFplay cliente para {host}."}), 500
 
+@app.route('/mininet/ping_between_hosts', methods=['POST'])
+def ping_between_hosts():
+    from flask import Response
+    import threading
+
+    data = request.get_json()
+    origen = data.get('origen')
+    destino = data.get('destino')
+
+    if not origen or not destino:
+        return jsonify({"error": "Faltan parámetros: origen y destino"}), 400
+
+    pid_origen = get_host_pid(origen)
+    if not pid_origen:
+        return jsonify({"error": f"No se encontró PID para {origen}"}), 500
+
+    def generate():
+        try:
+            cmd = ['mnexec', '-a', str(pid_origen), 'ping', '-c', '3', destino]
+            print(f"[DEBUG] Ejecutando: {' '.join(cmd)}")
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+            for line in iter(process.stdout.readline, ''):
+                yield f"data: {line.strip()}\n\n"
+                time.sleep(0.2)  # pequeño retraso para dar efecto de consola
+
+            process.stdout.close()
+            process.wait()
+        except Exception as e:
+            yield f"data: ERROR: {str(e)}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/mininet/ping_between_hosts_stream')
+def ping_between_hosts_stream():
+    from flask import Response, request
+
+    origen = request.args.get('origen')
+    destino = request.args.get('destino')
+
+    if not origen or not destino:
+        return Response("data: Faltan parámetros: origen y destino\n\n", mimetype='text/event-stream')
+
+    pid_origen = get_host_pid(origen)
+    if not pid_origen:
+        return Response(f"data: No se encontró PID para {origen}\n\n", mimetype='text/event-stream')
+
+    def generate():
+        try:
+            cmd = ['mnexec', '-a', str(pid_origen), 'ping', '-c', '3', destino]
+            print(f"[DEBUG] Ejecutando: {' '.join(cmd)}")
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+            for line in iter(process.stdout.readline, ''):
+                yield f"data: {line.strip()}\n\n"
+                time.sleep(0.2)
+
+            process.stdout.close()
+            process.wait()
+        except Exception as e:
+            yield f"data: ERROR: {str(e)}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream')
+
+
 if __name__ == '__main__':
     # El agente debe ejecutarse en la máquina donde está Mininet,
     # y debe ser accesible desde la máquina donde corre la aplicación Flask principal.

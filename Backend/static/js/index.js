@@ -40,130 +40,216 @@ let map;
 let markers = {}; // {dpid: marker_obj}
 let polylines = []; // Array of polyline objects
 
+let selectedHosts = [];
+
 async function loadTopology() {
     try {
         const response = await fetch(`${API_BASE_URL}/topology/get`);
-        
-        // Check if the HTTP response was successful
+
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
             throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || response.statusText}`);
         }
 
         const data = await response.json();
-        console.log("Data received from backend:", data); // Debugging log
+        console.log("Data received from backend:", data);
 
         if (map) {
-            map.remove(); // Remove existing map instance
+            map.remove();
         }
-        // Set the initial map view to the desired coordinates
-        map = L.map('mapa-topologia').setView([54.5, 15.3], 4); // Coordinates and zoom from your original code
+
+        map = L.map('mapa-topologia').setView([54.5, 15.3], 4);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
 
-        // Clear existing markers and polylines
         Object.values(markers).forEach(marker => marker.remove());
         polylines.forEach(polyline => polyline.remove());
         markers = {};
         polylines = [];
+        let allLatLngs = [];
 
-        let allLatLngs = []; // To adjust map bounds
-
-        // Add switches
+        // Switches
         if (data.switches && Array.isArray(data.switches)) {
             data.switches.forEach(sw => {
-                // Ensure latitude and longitude exist and are numbers
                 if (typeof sw.latitud === 'number' && typeof sw.longitud === 'number') {
-                    const marker = L.marker([sw.latitud, sw.longitud]).addTo(map) 
-                        .bindPopup(`<b>${sw.nombre}</b><br>DPID: ${sw.dpid}`); 
+                    const marker = L.marker([sw.latitud, sw.longitud])
+                        .addTo(map)
+                        .bindPopup(`<b>${sw.nombre}</b><br>DPID: ${sw.dpid}`);
                     markers[sw.dpid] = marker;
-                    allLatLngs.push([sw.latitud, sw.longitud]); // Add to the list to adjust bounds
-                } else {
-                    console.warn(`Invalid coordinates for switch ${sw.nombre}: latitud=${sw.latitud}, longitud=${sw.longitud}`);
+                    allLatLngs.push([sw.latitud, sw.longitud]);
                 }
             });
-        } else {
-            console.warn('data.switches is not an array or is undefined:', data.switches);
         }
 
-
-        // Add hosts (optional, if you want to visualize them)
+        // Hosts con selección
         if (data.hosts && Array.isArray(data.hosts)) {
             data.hosts.forEach(host => {
                 const connectedSwitch = data.switches.find(sw => sw.id_switch === host.id_switch_conectado);
                 if (connectedSwitch && typeof connectedSwitch.latitud === 'number' && typeof connectedSwitch.longitud === 'number') {
-                    // Slight displacement from the switch for visibility
                     const lat = connectedSwitch.latitud + (Math.random() - 0.5) * 0.01;
                     const lon = connectedSwitch.longitud + (Math.random() - 0.5) * 0.01;
-                    L.marker([lat, lon], { 
-                        icon: L.divIcon({ 
-                            className: 'custom-host-icon', 
-                            html: `<div style="background-color: #4CAF50; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold;">H</div>`, 
-                            iconSize: [24, 24], 
-                            iconAnchor: [12, 12] 
-                        })
-                    }).addTo(map) 
-                    .bindPopup(`<b>${host.nombre}</b><br>MAC: ${host.mac}<br>IP: ${host.ip}<br>Connected to: ${connectedSwitch.nombre}`); 
-                    allLatLngs.push([lat, lon]); // Add to the list to adjust bounds
-                } else {
-                    console.warn(`Invalid connected switch coordinates for host ${host.nombre}:`, connectedSwitch);
+
+                    const hostIcon = (color = '#4CAF50') => L.divIcon({
+                        className: 'custom-host-icon',
+                        html: `<div style="background-color: ${color}; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold;">H</div>`,
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                    });
+
+                    const marker = L.marker([lat, lon], { icon: hostIcon() })
+                        .addTo(map)
+                        .bindPopup(`<b>${host.nombre}</b><br>MAC: ${host.mac}<br>IP: ${host.ip}<br>Conectado a: ${connectedSwitch.nombre}`);
+
+                    marker.on('click', () => {
+                        const index = selectedHosts.findIndex(h => h.nombre === host.nombre);
+                        if (index !== -1) {
+                            selectedHosts.splice(index, 1);
+                            marker.setIcon(hostIcon()); // Restaurar color
+                        } else {
+                            if (selectedHosts.length < 2) {
+                                selectedHosts.push(host);
+                                marker.setIcon(hostIcon('#FF9800')); // Color diferente para seleccionado
+                            } else {
+                                alert("Solo puedes seleccionar 2 hosts.");
+                            }
+                        }
+                    });
+
+                    allLatLngs.push([lat, lon]);
                 }
             });
-        } else {
-            console.warn('data.hosts is not an array or is undefined:', data.hosts);
         }
 
-
-        // Add links
+        // Enlaces
         if (data.enlaces && Array.isArray(data.enlaces)) {
             data.enlaces.forEach(link => {
                 const sourceSwitch = data.switches.find(sw => sw.id_switch === link.id_origen);
                 const destSwitch = data.switches.find(sw => sw.id_switch === link.id_destino);
-                if (sourceSwitch && destSwitch && 
+                if (sourceSwitch && destSwitch &&
                     typeof sourceSwitch.latitud === 'number' && typeof sourceSwitch.longitud === 'number' &&
                     typeof destSwitch.latitud === 'number' && typeof destSwitch.longitud === 'number') {
-                    
-                    // Use the colorByBandwidth function for link color
-                    const linkColor = colorPorAnchoBanda(link.ancho_banda);
 
-                    const polyline = L.polyline([ 
-                        [sourceSwitch.latitud, sourceSwitch.longitud], 
-                        [destSwitch.latitud, destSwitch.longitud] 
-                    ], { 
-                        color: linkColor, // Apply color based on bandwidth
-                        weight: 3, 
-                        opacity: 0.7 
-                    }).addTo(map) 
-                      .bindPopup(`Link: ${sourceSwitch.nombre} <-> ${destSwitch.nombre}<br>BW: ${link.ancho_banda} Mbps`); 
+                    const polyline = L.polyline([
+                        [sourceSwitch.latitud, sourceSwitch.longitud],
+                        [destSwitch.latitud, destSwitch.longitud]
+                    ], {
+                        color: colorPorAnchoBanda(link.ancho_banda),
+                        weight: 3,
+                        opacity: 0.7
+                    }).addTo(map)
+                        .bindPopup(`Link: ${sourceSwitch.nombre} <-> ${destSwitch.nombre}<br>BW: ${link.ancho_banda} Mbps`);
                     polylines.push(polyline);
                     allLatLngs.push([sourceSwitch.latitud, sourceSwitch.longitud]);
                     allLatLngs.push([destSwitch.latitud, destSwitch.longitud]);
-                } else {
-                    console.warn(`Invalid link switch coordinates for link ${link.id_origen}-${link.id_destino}:`, sourceSwitch, destSwitch);
                 }
             });
-        } else {
-            console.warn('data.enlaces is not an array or is undefined:', data.enlaces);
         }
 
-
-        // Adjust map bounds to fit all markers
-        // Only adjust if there are markers to prevent the map from "zooming out" too much if there's no data.
         if (allLatLngs.length > 0) {
             const bounds = L.latLngBounds(allLatLngs);
             map.fitBounds(bounds, { padding: [50, 50] });
-        } else {
-            // If no markers, the map will already be at the initial view defined above
-            console.log("No markers to adjust map bounds. Keeping initial view.");
         }
 
     } catch (error) {
         console.error('Error loading topology:', error);
-        showMessageModal('Error', 'Could not load network topology: ' + error.message);
+        showMessageModal('Error', 'No se pudo cargar la topología: ' + error.message);
     }
 }
+
+async function probarPing() {
+  if (selectedHosts.length !== 2) {
+    alert("Debes seleccionar exactamente 2 hosts para probar la conectividad.");
+    return;
+  }
+
+  const origen = selectedHosts[0].nombre;
+  const destinoIp = selectedHosts[1].ip;
+
+  console.log(`[INFO] Enviando ping de ${origen} a ${destinoIp}`);
+  mostrarPingStream(origen, destinoIp); // Mostrar salida en vivo
+}
+
+async function obtenerYMostrarRuta(srcIp, dstIp) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/topology/rutas/ultima?src=${srcIp}&dst=${dstIp}`);
+    const dataRuta = await res.json();
+
+    const outputDiv = document.getElementById('ruta-output');
+    if (dataRuta.ruta && Array.isArray(dataRuta.ruta) && dataRuta.ruta.length > 0) {
+      const textoRuta = dataRuta.ruta.map(([dpid, port]) => `S${dpid} → P${port}`).join(' ➝ ');
+      outputDiv.textContent = `Ruta:\n${textoRuta}`;
+      dibujarRutaEnMapa(dataRuta.ruta); // ← ¡Aquí se dibuja!
+    } else {
+      outputDiv.textContent = "No se encontró una ruta para mostrar.";
+    }
+  } catch (error) {
+    console.error("Error consultando la ruta:", error);
+  }
+}
+
+
+
+function mostrarPingStream(origen, destinoIp) {
+  const output = document.getElementById('ping-output');
+  output.textContent = `Iniciando ping de ${origen} a ${destinoIp}...\n`;
+
+  const url = `${MININET_AGENT_URL}/mininet/ping_between_hosts_stream?origen=${origen}&destino=${destinoIp}`;
+  const eventSource = new EventSource(url);
+
+  eventSource.onmessage = function (event) {
+    output.textContent += event.data + '\n';
+    output.parentElement.scrollTop = output.parentElement.scrollHeight;
+
+    // Detectar el final del ping para cerrar el stream y obtener la ruta
+    if (event.data.includes('Fin del ping') || event.data.includes('error de conexión')) {
+      eventSource.close();
+      obtenerYMostrarRuta(origen, destinoIp);
+    }
+  };
+
+  eventSource.onerror = function () {
+    output.textContent += '\n[Fin del ping o error de conexión]\n';
+    eventSource.close();
+    obtenerYMostrarRuta(origen, destinoIp);
+  };
+}
+
+
+let rutaPolylines = [];
+
+function dibujarRutaEnMapa(ruta) {
+  // Elimina líneas anteriores de ruta
+  rutaPolylines.forEach(line => line.remove());
+  rutaPolylines = [];
+
+  if (!Array.isArray(ruta) || ruta.length === 0) return;
+
+  ruta.forEach(([dpid, port], index) => {
+    if (index < ruta.length - 1) {
+      const nextDpid = ruta[index + 1][0];
+      const sourceSwitch = data.switches.find(sw => sw.id_switch === dpid);
+      const destSwitch = data.switches.find(sw => sw.id_switch === nextDpid);
+
+      if (sourceSwitch && destSwitch) {
+        const polyline = L.polyline([
+          [sourceSwitch.latitud, sourceSwitch.longitud],
+          [destSwitch.latitud, destSwitch.longitud]
+        ], {
+          color: 'red',
+          weight: 5,
+          opacity: 0.9,
+          dashArray: '6',
+        }).addTo(map);
+        rutaPolylines.push(polyline);
+      }
+    }
+  });
+}
+
+
+
 
 // --- Dashboard Functions ---
 async function updateDashboard() {
@@ -640,10 +726,13 @@ document.addEventListener('DOMContentLoaded', () => {
     loadTopology();
     updateDashboard();
     loadConfigHistory();
-    loadSwitchesForLinks(); // Load switches for link dropdowns
-    loadActiveLinks(); // Load and display active links
+    loadSwitchesForLinks(); 
+    loadActiveLinks(); 
 
-    // Refresh data periodically
+    // ⏱ Actualizaciones periódicas
     setInterval(updateDashboard, 5000);
-    setInterval(loadActiveLinks, 10000); // Refresh links every 10 seconds
+    setInterval(loadActiveLinks, 10000);
+
+    // ✅ Conectar botón de ping
+    document.getElementById('btn-ping').addEventListener('click', probarPing);
 });
