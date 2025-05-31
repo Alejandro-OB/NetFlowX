@@ -17,7 +17,8 @@ from config import Config
 from routes.servers import servers_bp
 # NUEVO: Importar el blueprint de solicitudes de cliente
 from routes.client_requests import client_requests_bp
-
+from routes.dijkstra import dijkstra_bp
+from routes.igmp_server import igmp_bp
 
 def get_db():
     """
@@ -47,9 +48,9 @@ def create_app():
     app.register_blueprint(reglas_bp, url_prefix='/reglas')
     app.register_blueprint(video_bp, url_prefix='/config/video')
     app.register_blueprint(servers_bp, url_prefix='/servers')
-    # NUEVO: Registrar el blueprint de solicitudes de cliente
     app.register_blueprint(client_requests_bp, url_prefix='/client')
-    
+    app.register_blueprint(dijkstra_bp, url_prefix='/dijkstra')
+    app.register_blueprint(igmp_bp, url_prefix='/igmp')
 
     # Rutas utilitarias
     @app.route('/')
