@@ -1,4 +1,3 @@
-
 // Array global para mantener el estado de los clientes FFplay activos
 let activeFFplayClients = [];
 
@@ -375,9 +374,11 @@ async function loadActiveClientsFromDB() {
 
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
-    loadMininetHosts(); // Cargar hosts al inicio
+    loadMininetHosts(); 
     updateActiveClientsTable(); 
-    updateActiveClientsDashboard();// Inicializar la tabla de clientes activos
-    // Refrescar la lista de servidores periódicamente si es necesario para el dashboard
-    setInterval(updateActiveClientsTable, 10000); 
+    updateActiveClientsDashboard();
+    setInterval(() => {
+        updateActiveClientsTable();
+        updateActiveClientsDashboard(); 
+    }, 10000);
 });

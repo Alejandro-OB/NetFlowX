@@ -809,7 +809,7 @@ class Controller(app_manager.RyuApp):
             actions = [parser.OFPActionOutput(out_port)]
             # Flujos permanentes
             self.add_flow(datapath, priority=100, match=match, actions=actions,
-                          buffer_id=msg.buffer_id, idle_timeout=0, hard_timeout=0)
+                          buffer_id=msg.buffer_id, idle_timeout=60, hard_timeout=60)
 
             data = None
             if msg.buffer_id == ofproto.OFP_NO_BUFFER:
@@ -880,7 +880,7 @@ class Controller(app_manager.RyuApp):
 
                 buffer_id_use = msg.buffer_id if cur_dpid == dpid and msg.buffer_id != ofproto.OFP_NO_BUFFER else ofproto.OFP_NO_BUFFER
                 self.add_flow(cur_dp, priority=100, match=match, actions=actions,
-                              buffer_id=buffer_id_use, idle_timeout=0, hard_timeout=0)
+                              buffer_id=buffer_id_use, idle_timeout=60, hard_timeout=60)
                 self.logger.info(f"Flujo instalado en switch {cur_dpid} para {src_mac}->{dst_mac} a través del puerto {out_port}")
 
             # Solicitar ruta inversa (dst→src)
@@ -923,7 +923,7 @@ class Controller(app_manager.RyuApp):
                 reverse_actions = [parser.OFPActionOutput(out_port)]
 
                 self.add_flow(cur_dp, priority=100, match=reverse_match, actions=reverse_actions,
-                              idle_timeout=0, hard_timeout=0)
+                              idle_timeout=60, hard_timeout=60)
                 self.logger.info(f"[RETORNO] Flujo instalado en switch {cur_dpid} para {dst_mac}->{src_mac} por puerto {out_port}")
 
             # Reenviar el primer paquete (ida) para que el flujo empiece a tomar efecto

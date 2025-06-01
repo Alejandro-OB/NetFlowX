@@ -15,53 +15,60 @@ let polylines  = [];            // Líneas que representan enlaces
 let selectedHosts = [];         // [{ mac, ip, name, id_switch }, ...] (máximo 2)
 let rutaPolylines = [];         // Líneas rojas que marcan la ruta calculada
 
-// URL del controlador Ryu (opcional; si no lo usas, déjalo comentado)
-// const RYU_API_BASE_URL = 'http://192.168.18.161:8080';
 
-// =======================================
-//  Función auxiliar para color de enlaces
-// =======================================
 function colorPorAnchoBanda(ancho_banda) {
-  if (ancho_banda >= 1000)      return '#008000'; // verde
-  else if (ancho_banda >= 100)  return '#FFA500'; // naranja
-  else                           return '#FF0000'; // rojo
+  if (ancho_banda >= 1000) return '#008000';
+  else if (ancho_banda >= 100) return '#FFA500';
+  else return '#FF0000';
 }
 
-// ==========================================
-//  Función para mostrar mensajes/modales
-// ==========================================
+function hostIcon(seleccionado = false) {
+  return L.icon({
+    iconUrl: seleccionado ? '/icons/monitor_selected.png' : '/icons/monitor.png',
+    iconSize: [13, 13],
+    iconAnchor: [6.5, 6.5],
+    popupAnchor: [0, -16]
+  });
+}
+
+
+function getSwitchIcon() {
+  return L.icon({
+    iconUrl: '/icons/switch.png',
+    iconSize: [18, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -16]
+  });
+}
+
+
+
 function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
-  const modal       = document.getElementById('message-modal');
-  const titleElem   = document.getElementById('message-modal-title');
+  const modal = document.getElementById('message-modal');
+  const titleElem = document.getElementById('message-modal-title');
   const contentElem = document.getElementById('message-modal-content');
-  const confirmBtn  = document.getElementById('message-modal-confirm-btn');
-  const cancelBtn   = document.getElementById('message-modal-cancel-btn');
+  const confirmBtn = document.getElementById('message-modal-confirm-btn');
+  const cancelBtn = document.getElementById('message-modal-cancel-btn');
 
   if (!modal || !titleElem || !contentElem || !confirmBtn || !cancelBtn) {
-    // Si no existe el modal en el DOM, caemos a un alert simple
     alert(`${title}\n\n${message}`);
     if (isConfirm && onConfirm) onConfirm();
     return;
   }
 
-  titleElem.textContent   = title;
+  titleElem.textContent = title;
   contentElem.textContent = message;
-
   confirmBtn.onclick = null;
-  cancelBtn.onclick  = null;
+  cancelBtn.onclick = null;
 
   confirmBtn.onclick = () => {
     modal.classList.add('hidden');
-    if (isConfirm && onConfirm) {
-      onConfirm();
-    }
+    if (isConfirm && onConfirm) onConfirm();
   };
 
   if (isConfirm) {
     cancelBtn.classList.remove('hidden');
-    cancelBtn.onclick = () => {
-      modal.classList.add('hidden');
-    };
+    cancelBtn.onclick = () => modal.classList.add('hidden');
   } else {
     cancelBtn.classList.add('hidden');
   }
@@ -69,207 +76,153 @@ function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
   modal.classList.remove('hidden');
 }
 
-// =======================================
-//  Carga y dibuja toda la topología
-// =======================================
 async function loadTopology() {
   try {
     const response = await fetch(`${API_BASE_URL}/topology/get`);
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({ message: 'Unknown error' }));
-      throw new Error(`HTTP ${response.status}: ${errData.message || response.statusText}`);
-    }
-
+    if (!response.ok) throw new Error(`Error ${response.status}`);
     const data = await response.json();
-    console.log("loadTopology → data:", data);
+    if (map) map.remove();
 
-    // Si el mapa ya existía, lo removemos para recrearlo
-    if (map) {
-      map.remove();
-    }
-
-    // Inicializar Leaflet en el contenedor con ID 'mapa-topologia'
     const mapContainer = document.getElementById('mapa-topologia');
-    if (!mapContainer) {
-      throw new Error("Elemento HTML con id='mapa-topologia' no encontrado.");
-    }
-    map = L.map(mapContainer).setView([54.5, 15.3], 4);
+    if (!mapContainer) throw new Error("No se encontró el contenedor del mapa");
+
+    map = L.map(mapContainer);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // Limpiar marcadores/enlaces previos
-    Object.values(markers).forEach(marker => marker.remove());
-    Object.values(hostMarkers).forEach(marker => marker.remove());
-    polylines.forEach(poly => poly.remove());
-    markers     = {};
+    Object.values(markers).forEach(m => m.remove());
+    Object.values(hostMarkers).forEach(m => m.remove());
+    polylines.forEach(p => p.remove());
+    rutaPolylines.forEach(r => r.remove());
+
+    markers = {};
     hostMarkers = {};
-    polylines   = [];
+    polylines = [];
+    rutaPolylines = [];
     selectedHosts = [];
     let allLatLngs = [];
 
-    // -----------------------
-    //  Dibujar SWITCHES
-    // -----------------------
     if (Array.isArray(data.switches)) {
       data.switches.forEach(sw => {
         if (typeof sw.latitud === 'number' && typeof sw.longitud === 'number') {
           const marker = L.marker([sw.latitud, sw.longitud], {
-            icon: L.divIcon({
-              className: `custom-switch-icon ${sw.status}`,
-              html: `<div class="switch-marker">${sw.nombre}</div>`,
-              iconSize: [60, 20],
-              iconAnchor: [30, 10]
-            })
-          })
-          .addTo(map)
-          .bindPopup(`<b>${sw.nombre}</b><br>DPID (hex): ${sw.dpid_str}<br>id_switch: ${sw.id_switch}<br>Estado: ${sw.status}`);
+            icon: getSwitchIcon()
+          }).addTo(map)
+            .bindPopup(`<b>${sw.nombre}</b><br>DPID: ${sw.dpid_str}<br>id_switch: ${sw.id_switch}<br>Estado: ${sw.status}`);
 
           markers[sw.id_switch] = marker;
           allLatLngs.push([sw.latitud, sw.longitud]);
-        } else {
-          console.warn(`Switch '${sw.nombre}' tiene coordenadas inválidas.`);
         }
       });
-    } else {
-      console.warn("loadTopology: 'switches' no es un arreglo válido.", data.switches);
     }
 
-    // -----------------------
-    //  Dibujar ENLACES
-    // -----------------------
     if (Array.isArray(data.enlaces)) {
       data.enlaces.forEach(enlace => {
-        const sourceSwitch = data.switches.find(sw => sw.id_switch === enlace.id_origen);
-        const destSwitch   = data.switches.find(sw => sw.id_switch === enlace.id_destino);
-
-        if (
-          sourceSwitch &&
-          destSwitch &&
-          typeof sourceSwitch.latitud === 'number' &&
-          typeof sourceSwitch.longitud === 'number' &&
-          typeof destSwitch.latitud === 'number' &&
-          typeof destSwitch.longitud === 'number'
-        ) {
+        const sw1 = data.switches.find(sw => sw.id_switch === enlace.id_origen);
+        const sw2 = data.switches.find(sw => sw.id_switch === enlace.id_destino);
+        if (sw1 && sw2) {
           const polyline = L.polyline([
-            [sourceSwitch.latitud, sourceSwitch.longitud],
-            [destSwitch.latitud,   destSwitch.longitud]
+            [sw1.latitud, sw1.longitud],
+            [sw2.latitud, sw2.longitud]
           ], {
             color: colorPorAnchoBanda(enlace.ancho_banda),
             weight: 3,
             opacity: 0.7
           }).addTo(map)
-            .bindPopup(`
-              <b>Enlace:</b> ${sourceSwitch.nombre} ↔ ${destSwitch.nombre}<br>
-              Ancho de Banda: ${enlace.ancho_banda} Mbps
-            `);
-
+            .bindPopup(`<b>${sw1.nombre} ↔ ${sw2.nombre}</b><br>Ancho de Banda: ${enlace.ancho_banda} Mbps`);
           polylines.push(polyline);
-          allLatLngs.push([sourceSwitch.latitud, sourceSwitch.longitud]);
-          allLatLngs.push([destSwitch.latitud,   destSwitch.longitud]);
-        } else {
-          console.warn(`Enlace inválido entre id_origen=${enlace.id_origen} y id_destino=${enlace.id_destino}.`);
+          allLatLngs.push([sw1.latitud, sw1.longitud], [sw2.latitud, sw2.longitud]);
         }
       });
-    } else {
-      console.warn("loadTopology: 'enlaces' no es un arreglo válido.", data.enlaces);
     }
 
-    // -----------------------
-    //  Dibujar HOSTS como marcadores “H” y permitir selección con clic
-    // -----------------------
-    if (Array.isArray(data.hosts)) {
-      data.hosts.forEach(host => {
-        // Se asume que el JSON trae host.id_switch_conectado (string o número)
-        const switchAsociado = data.switches.find(sw => sw.id_switch === parseInt(host.id_switch_conectado, 10));
-        if (switchAsociado) {
-          // Calculamos un pequeño offset para no solapar el marcador con el switch
-          const latOffset = switchAsociado.latitud + (Math.random() - 0.5) * 0.01;
-          const lonOffset = switchAsociado.longitud + (Math.random() - 0.5) * 0.01;
+    const hostsPorSwitch = {};
+    data.hosts.forEach(host => {
+      const idSw = parseInt(host.id_switch_conectado, 10);
+      if (!hostsPorSwitch[idSw]) hostsPorSwitch[idSw] = [];
+      hostsPorSwitch[idSw].push(host);
+    });
 
-          // Creamos el icono circular “H” (verde por defecto)
-          const hostIcon = (color = '#4CAF50') => L.divIcon({
-            className: 'custom-host-icon',
-            html: `<div style="
-              background-color: ${color};
-              color: white;
-              border-radius: 50%;
-              width: 24px;
-              height: 24px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-size: 12px;
-              font-weight: bold;
-            ">H</div>`,
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
-          });
+    function getOffsetPosition(baseLat, baseLon, index, total) {
+      const spacing = 1.4; // distancia horizontal entre hosts
+      const offsetLon = baseLon + (index - (total - 1) / 2) * spacing;
+      const offsetLat = baseLat - .93; // un poco más abajo del switch
+      return [offsetLat, offsetLon];
+    }
 
-          // Colocamos el marcador en Leaflet
-          const hostMarker = L.marker([latOffset, lonOffset], { icon: hostIcon() })
-            .addTo(map)
-            .bindPopup(`<b>${host.nombre}</b><br>IP: ${host.ip}<br>MAC: ${host.mac}<br>Switch: ${switchAsociado.nombre}`);
 
-          // Guardamos el marcador para referenciarlo luego (por su MAC)
-          hostMarkers[host.mac] = hostMarker;
+    Object.entries(hostsPorSwitch).forEach(([idSw, hosts]) => {
+      const sw = data.switches.find(sw => sw.id_switch === parseInt(idSw));
+      if (!sw) return;
+      hosts.forEach((host, i) => {
+        const [lat, lon] = getOffsetPosition(sw.latitud, sw.longitud, i, hosts.length);
+        const marker = L.marker([lat, lon], { icon: hostIcon(false) })
+          .addTo(map)
+          .bindPopup(`<b>${host.nombre}</b><br>IP: ${host.ip}<br>MAC: ${host.mac}<br>Switch: ${sw.nombre}`)
+          .bindTooltip(`${host.nombre} (${host.ip})`, { direction: 'top' });
 
-          // Al hacer clic, alternamos selección (verde <-> naranja)
-          hostMarker.on('click', () => {
-            const idx = selectedHosts.findIndex(h => h.mac === host.mac);
-            if (idx !== -1) {
-              // Si ya estaba seleccionado, lo deseleccionamos
-              selectedHosts.splice(idx, 1);
-              hostMarker.setIcon(hostIcon()); // Volver a verde
-            } else {
-              // Si no estaba seleccionado, solo podemos tener hasta 2
-              if (selectedHosts.length < 2) {
-                selectedHosts.push({
-                  mac: host.mac,
-                  ip: host.ip,
-                  name: host.nombre,
-                  id_switch: switchAsociado.id_switch
-                });
-                hostMarker.setIcon(hostIcon('#FF9800')); // Color naranja para marcado
-              } else {
-                showMessageModal('Atención', 'Solo puedes seleccionar 2 hosts para el ping.');
+        hostMarkers[host.mac] = marker;
+        allLatLngs.push([lat, lon]);
+
+        marker.on('click', () => {
+          const idx = selectedHosts.findIndex(h => h.mac === host.mac);
+
+          if (idx !== -1) {
+            selectedHosts.splice(idx, 1);
+            marker.setIcon(hostIcon(false));
+          } else {
+            if (selectedHosts.length === 2) {
+              const removed = selectedHosts.pop();
+              const removedMarker = hostMarkers[removed.mac];
+              if (removedMarker) {
+                removedMarker.setIcon(hostIcon(false));
               }
             }
-            togglePingButton();
-          });
+            selectedHosts.push({
+              mac: host.mac,
+              ip: host.ip,
+              name: host.nombre,
+              id_switch: sw.id_switch
+            });
+            marker.setIcon(hostIcon(true));
+          }
 
-          allLatLngs.push([latOffset, lonOffset]);
-        } else {
-          console.warn(`Host '${host.nombre}' no tiene un switch asociado válido.`);
-        }
+          togglePingButton();
+        });
+
+        // Línea de conexión del host al switch
+        const hostLine = L.polyline([
+          [sw.latitud, sw.longitud],
+          [lat, lon]
+        ], {
+          color: '#666',
+          weight: 3,
+          opacity: 0.8,
+          dashArray: '4,6'
+        }).addTo(map);
+        polylines.push(hostLine);
       });
-    } else {
-      console.warn("loadTopology: 'hosts' no es un arreglo válido.", data.hosts);
-    }
+    });
 
-    // Ajuste del zoom para que quede toda la topología en pantalla
     if (allLatLngs.length > 0) {
       const bounds = L.latLngBounds(allLatLngs);
-      map.fitBounds(bounds.pad(0.5));
+      map.fitBounds(bounds.pad(0.1)); // Disminuido para mejor visibilidad
     }
 
-    // Al final de la carga, aseguramos que el botón de ping esté correctamente habilitado/deshabilitado
     togglePingButton();
-
   } catch (err) {
     console.error("Error en loadTopology:", err);
     showMessageModal('Error', `No se pudo cargar la topología: ${err.message}`);
   }
 }
 
-// =======================================
-//  Activa/Desactiva el botón de ping
-// =======================================
+
 function togglePingButton() {
   const pingButton = document.getElementById('btn-ping');
-  if (!pingButton) return;
-  pingButton.disabled = (selectedHosts.length !== 2);
+  if (pingButton) pingButton.disabled = (selectedHosts.length !== 2);
 }
+
 
 // ===========================================
 //  Inicia el ping (SSE) y, al finalizar, calcula ruta
@@ -365,26 +318,6 @@ async function obtenerYMostrarRuta(origenMac, destinoMac, origenIdSwitch, destin
 
     // 3) Dibujar ruta en el mapa
     dibujarRutaEnMapa(pathArr, allSwitchesData);
-
-    // 4) (Opcional) Enviar ruta a Ryu si necesitas configurar flujos
-    /*
-    const ryuPayload = {
-      src_dpid: origenIdSwitch,
-      dst_dpid: destinoIdSwitch,
-      path: pathArr
-    };
-    const ryuRes = await fetch(`${RYU_API_BASE_URL}/add_path`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ryuPayload)
-    });
-    if (!ryuRes.ok) {
-      const errRyu = await ryuRes.json().catch(() => ({ message: 'Unknown error' }));
-      throw new Error(`Ryu error ${ryuRes.status}: ${errRyu.message || ryuRes.statusText}`);
-    }
-    output.textContent += 'Ruta enviada a Ryu exitosamente.\n';
-    console.log("Ruta enviada a Ryu:", ryuPayload);
-    */
 
   } catch (err) {
     output.textContent += `Error: ${err.message}\n`;

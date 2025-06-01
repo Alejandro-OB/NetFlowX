@@ -56,7 +56,11 @@ def create_app():
     @app.route('/')
     def index():
         """Sirve el archivo index.html."""
-        return send_from_directory('.', 'index.html')
+        return send_from_directory('.', 'templates/index.html')
+    
+    @app.route('/icons/<path:filename>')
+    def custom_static(filename):
+        return send_from_directory('icons', filename)
         
     @app.route('/ping')
     def ping():

@@ -4,6 +4,7 @@ import os
 import atexit
 import signal
 import time
+import psycopg2
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -269,6 +270,177 @@ def get_running_processes():
     """
     # Retorna una copia para evitar modificar el diccionario original desde fuera
     return jsonify(video_processes_agent), 200
+
+@app.route('/mininet/add_link', methods=['POST'])
+def add_link():
+    """
+    Recibe JSON:
+      {
+        "id_origen": <int>,
+        "id_destino": <int>,
+        "ancho_banda": <int>  # en Mbps
+      }
+
+    1) Consulta la tabla 'puertos' para obtener (puerto_origen, puerto_destino).
+    2) Crea dos patch‐ports OVS que conectan s<id_origen> <--> s<id_destino>,
+       forzando con 'ofport_request' que el puerto interno coincida con esos puertos.
+    3) Aplica un tc qdisc tipo TBF a cada interfaz patch, limitando a 'ancho_banda' Mbps.
+    """
+
+    data = request.get_json() or {}
+    id_origen  = data.get('id_origen')
+    id_destino = data.get('id_destino')
+    bw_mbps    = data.get('ancho_banda')
+
+    # --- 1) Validar parámetros ---
+    if id_origen is None or id_destino is None or bw_mbps is None:
+        return (jsonify({"error": "Faltan parámetros: id_origen, id_destino y/o ancho_banda"}), 400)
+    try:
+        id_origen  = int(id_origen)
+        id_destino = int(id_destino)
+        bw_mbps    = int(bw_mbps)
+    except ValueError:
+        return (jsonify({"error": "id_origen, id_destino y ancho_banda deben ser enteros"}), 400)
+    if id_origen == id_destino:
+        return (jsonify({"error": "id_origen e id_destino no pueden ser iguales"}), 400)
+
+    # --- 2) Leer de la BD: puerto_origen / puerto_destino ---
+    conn = None
+    cur  = None
+    try:
+        conn = psycopg2.connect(
+            dbname="geant_network",
+            user="geant_user",
+            password="geant",
+            host="192.168.18.151",
+            port="5432",
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT puerto_origen, puerto_destino
+            FROM puertos
+            WHERE id_origen_switch = %s
+              AND id_destino_switch = %s
+            LIMIT 1;
+        """, (id_origen, id_destino))
+        row = cur.fetchone()
+        if row is None:
+            return (
+                jsonify({
+                    "error": f"No existe registro en 'puertos' para "
+                             f"id_origen_switch={id_origen} y id_destino_switch={id_destino}"
+                }),
+                404
+            )
+        puerto_origen, puerto_destino = row
+        if puerto_origen is None or puerto_destino is None:
+            return (jsonify({"error": "Los campos puerto_origen/p_destino están vacíos en 'puertos'."}), 400)
+    except psycopg2.Error as e:
+        return (jsonify({"error": f"Error en la BD: {e}"}), 500)
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+    # Convertir a int (por si vienen como str)
+    try:
+        puerto_origen  = int(puerto_origen)
+        puerto_destino = int(puerto_destino)
+    except (ValueError, TypeError):
+        return (jsonify({"error": "Valores de puerto_origen/puerto_destino no válidos"}), 400)
+
+    # --- 3) Preparar nombres de switches e interfaces patch ---
+    switch_A      = f"s{id_origen}"
+    switch_B      = f"s{id_destino}"
+    iface_A_to_B  = f"patch-{id_origen}-{id_destino}"
+    iface_B_to_A  = f"patch-{id_destino}-{id_origen}"
+
+    # --- 4) Comprobar que los bridges OVS existen ---
+    try:
+        subprocess.run(
+            ["ovs-vsctl", "br-exists", switch_A],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        subprocess.run(
+            ["ovs-vsctl", "br-exists", switch_B],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except subprocess.CalledProcessError:
+        return (
+            jsonify({"error": f"Alguno de los switches OVS ({switch_A} o {switch_B}) no existe."}),
+            404
+        )
+
+    try:
+        # 5.1) Patch en A
+        subprocess.run([
+            "ovs-vsctl", "add-port", switch_A, iface_A_to_B,
+            "--", "set", "interface", iface_A_to_B,
+            "type=patch",
+            f"options:peer={iface_B_to_A}",
+            f"ofport_request={puerto_origen}"
+        ], check=True)
+
+        # 5.2) Patch en B
+        subprocess.run([
+            "ovs-vsctl", "add-port", switch_B, iface_B_to_A,
+            "--", "set", "interface", iface_B_to_A,
+            "type=patch",
+            f"options:peer={iface_A_to_B}",
+            f"ofport_request={puerto_destino}"
+        ], check=True)
+    except subprocess.CalledProcessError as e:
+        stderr_msg = ""
+        try:
+            stderr_msg = e.stderr.decode().strip()
+        except:
+            pass
+        # Si el puerto ya existía (por ejemplo, un patch duplicado),
+        # podemos detectarlo por “already exists” y seguir.
+        if "already exists" in stderr_msg or "exists" in stderr_msg:
+            # Continuamos para aplicar TC de todas formas
+            pass
+        else:
+            return (
+                jsonify({"error": f"Error al crear patch ports OVS: {stderr_msg or e}"}),
+                500
+            )
+
+    for iface in (iface_A_to_B, iface_B_to_A):
+        # 6.1) Eliminar qdisc previo (si existía)
+        subprocess.run(
+            ["tc", "qdisc", "del", "dev", iface, "root"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        # 6.2) Agregar TBF con la tasa de Mbps
+        try:
+            subprocess.run([
+                "tc", "qdisc", "add", "dev", iface, "root", "tbf",
+                "rate", f"{bw_mbps}mbit",
+                "burst", "10kb",
+                "latency", "70ms"
+            ], check=True)
+        except subprocess.CalledProcessError as e:
+            return (
+                jsonify({
+                    "error": f"No se pudo aplicar límite de ancho de banda a {iface}: {e}"
+                }),
+                500
+            )
+
+    # --- 7) Responder éxito ---
+    return (
+        jsonify({
+            "success": True,
+            "message": (
+                f"Enlace dinámico inyectado (patch) en Mininet: "
+                f"{switch_A}:{puerto_origen} <--> {switch_B}:{puerto_destino} "
+                f"(bw={bw_mbps} Mbps)"
+            )
+        }),
+        200
+    )
 
 if __name__ == '__main__':
     print("Agente: Iniciando el servidor Flask del agente...")

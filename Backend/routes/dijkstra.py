@@ -7,182 +7,193 @@ import logging
 
 from config import Config
 
-# Crear el blueprint
-# ==========================
-# Este archivo modifica la ruta /calculate_multicast_tree para incluir siempre
-
-# Blueprint de Flask
 dijkstra_bp = Blueprint('dijkstra', __name__)
 logger = logging.getLogger(__name__)
 
-# Diccionarios de topología
-network_graph = collections.defaultdict(dict)
-switches_by_dpid = {}
-host_to_switch_map = {}  # Map: MAC -> { 'dpid': int, 'port': int, 'ip': str, 'name': str }
+# -------------------------------------------------------------------
+# Diccionarios de topología (llenados en load_topology)
+network_graph      = collections.defaultdict(dict)
+switches_by_dpid   = {}   # { dpid_int: switch_nombre }
+host_to_switch_map = {}   # { mac: { 'dpid': int, 'port': int, 'ip': str, 'name': str } }
 
+# Mapeos auxiliares
+id_map           = {}  # { id_switch: dpid_int }
+id_to_name       = {}  # { id_switch: switch_nombre }
+hosts_id_to_name = {}  # { id_host: host_nombre }
+# -------------------------------------------------------------------
 
 def _get_db_connection():
     try:
         return psycopg2.connect(Config.get_db_uri())
     except Exception as e:
-        logger.error(f"Error de conexión a la base de datos: {e}")
+        logger.error(f"Error conectando a la BD: {e}")
         return None
 
 
 def load_topology():
+    """
+    Carga switches, hosts, puertos y enlaces en memory_graph, switches_by_dpid y host_to_switch_map.
+    """
     global network_graph, switches_by_dpid, host_to_switch_map
+    global id_map, id_to_name, hosts_id_to_name
+
     conn = _get_db_connection()
     if not conn:
         return
+
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # Cargar switches
+        # 1) Cargar switches
         cur.execute("SELECT id_switch, nombre FROM switches")
-        id_map = {}
-        id_to_name = {}
+        id_map.clear()
+        id_to_name.clear()
+        switches_by_dpid.clear()
+        network_graph.clear()
+
         for row in cur.fetchall():
             dpid_str = "{:016x}".format(row['id_switch'])
             dpid_int = int(dpid_str, 16)
-            switches_by_dpid[dpid_int] = row['nombre']
-            id_map[row['id_switch']] = dpid_int
+
+            id_map[row['id_switch']]     = dpid_int
             id_to_name[row['id_switch']] = row['nombre']
-            network_graph[dpid_int] = {}
+            switches_by_dpid[dpid_int]   = row['nombre']
+            network_graph[dpid_int]      = {}
 
-        # Construir diccionario de puertos (host-switch y switch-switch)
-        cur.execute("SELECT nodo_origen, nodo_destino, puerto_origen, puerto_destino FROM puertos")
+        # 2) Cargar hosts (para nombre y mapeo MAC→switch+puerto)
+        cur.execute("SELECT id_host, nombre, switch_asociado, ipv4 AS ip, mac FROM hosts")
+        hosts_id_to_name.clear()
+        temp_host_rows = cur.fetchall()
+        for row in temp_host_rows:
+            hosts_id_to_name[row['id_host']] = row['nombre']
+
+        # 3) Cargar puertos (usando las columnas FK)
+        cur.execute("""
+            SELECT
+              id_origen_switch,
+              id_origen_host,
+              id_destino_switch,
+              id_destino_host,
+              puerto_origen,
+              puerto_destino
+            FROM puertos;
+        """)
         puertos_dict = collections.defaultdict(dict)
-        for row in cur.fetchall():
-            puertos_dict[row['nodo_origen']][row['nodo_destino']] = (row['puerto_origen'], row['puerto_destino'])
 
-        # Cargar enlaces (bidireccionales) en network_graph
+        for row in cur.fetchall():
+            # Nombre de origen
+            if row['id_origen_switch'] is not None:
+                origin_name = id_to_name.get(row['id_origen_switch'])
+            else:
+                origin_name = hosts_id_to_name.get(row['id_origen_host'])
+
+            # Nombre de destino
+            if row['id_destino_switch'] is not None:
+                dest_name = id_to_name.get(row['id_destino_switch'])
+            else:
+                dest_name = hosts_id_to_name.get(row['id_destino_host'])
+
+            if origin_name and dest_name:
+                puertos_dict[origin_name][dest_name] = (
+                    row['puerto_origen'],
+                    row['puerto_destino']
+                )
+
+        # 4) Cargar enlaces en network_graph
         cur.execute("SELECT id_origen, id_destino, ancho_banda FROM enlaces")
         for row in cur.fetchall():
-            d1 = id_map.get(row['id_origen'])
-            d2 = id_map.get(row['id_destino'])
-            name1 = id_to_name.get(row['id_origen'])
-            name2 = id_to_name.get(row['id_destino'])
+            id1   = row['id_origen']
+            id2   = row['id_destino']
+            ancho = row['ancho_banda']
 
-            if d1 and d2 and name1 and name2:
-                cost = 1.0 / float(row['ancho_banda']) if row['ancho_banda'] > 0 else float('inf')
+            d1 = id_map.get(id1)
+            d2 = id_map.get(id2)
+            name1 = id_to_name.get(id1)
+            name2 = id_to_name.get(id2)
 
-                # Obtener puertos entre switches (origen->destino y destino->origen)
-                po12 = puertos_dict.get(name1, {}).get(name2, (None, None))[0] or puertos_dict.get(name2, {}).get(name1, (None, None))[1] or 1
-                pi21 = puertos_dict.get(name1, {}).get(name2, (None, None))[1] or puertos_dict.get(name2, {}).get(name1, (None, None))[0] or 1
-                po21 = puertos_dict.get(name2, {}).get(name1, (None, None))[0] or puertos_dict.get(name1, {}).get(name2, (None, None))[1] or 1
-                pi12 = puertos_dict.get(name2, {}).get(name1, (None, None))[1] or puertos_dict.get(name1, {}).get(name2, (None, None))[0] or 1
+            if d1 is None or d2 is None or name1 is None or name2 is None:
+                continue
 
-                network_graph[d1][d2] = {
-                    'cost': cost,
-                    'port_out': po12,
-                    'port_in_neighbor': pi21
-                }
-                network_graph[d2][d1] = {
-                    'cost': cost,
-                    'port_out': po21,
-                    'port_in_neighbor': pi12
-                }
+            cost = 1.0 / float(ancho) if ancho > 0 else float('inf')
 
-        # Cargar hosts y mapearlos a switches/puertos
-        cur.execute("SELECT nombre, switch_asociado, ipv4 AS ip, mac FROM hosts")
-        for row in cur.fetchall():
-            dpid = id_map.get(row['switch_asociado'])
-            switch_name = id_to_name.get(row['switch_asociado'])
-            host_name = row['nombre']
-            if dpid and switch_name:
-                port_host = 1
-                if puertos_dict.get(switch_name, {}).get(host_name):
-                    port_host = puertos_dict[switch_name][host_name][0] or 1
-                elif puertos_dict.get(host_name, {}).get(switch_name):
-                    port_host = puertos_dict[host_name][switch_name][1] or 1
+            # puertos entre name1 y name2
+            po12 = (
+                puertos_dict.get(name1, {}).get(name2, (None, None))[0]
+                or puertos_dict.get(name2, {}).get(name1, (None, None))[1]
+                or 1
+            )
+            pi21 = (
+                puertos_dict.get(name1, {}).get(name2, (None, None))[1]
+                or puertos_dict.get(name2, {}).get(name1, (None, None))[0]
+                or 1
+            )
+            po21 = (
+                puertos_dict.get(name2, {}).get(name1, (None, None))[0]
+                or puertos_dict.get(name1, {}).get(name2, (None, None))[1]
+                or 1
+            )
+            pi12 = (
+                puertos_dict.get(name2, {}).get(name1, (None, None))[1]
+                or puertos_dict.get(name1, {}).get(name2, (None, None))[0]
+                or 1
+            )
 
-                host_to_switch_map[row['mac']] = {
-                    'dpid': dpid,
-                    'port': port_host,
-                    'ip': row['ip'],
-                    'name': host_name
-                }
+            # Añadir aristas bidireccionales
+            network_graph[d1][d2] = {
+                'cost': cost,
+                'port_out': po12,
+                'port_in_neighbor': pi21
+            }
+            network_graph[d2][d1] = {
+                'cost': cost,
+                'port_out': po21,
+                'port_in_neighbor': pi12
+            }
+
+        # 5) Construir host_to_switch_map
+        host_to_switch_map.clear()
+        for row in temp_host_rows:
+            host_name   = row['nombre']
+            switch_id   = row['switch_asociado']
+            dpid        = id_map.get(switch_id)
+            switch_name = id_to_name.get(switch_id)
+
+            if dpid is None or switch_name is None:
+                continue
+
+            # Puerto en el switch al host
+            port_host = 1
+            if puertos_dict.get(switch_name, {}).get(host_name):
+                port_host = puertos_dict[switch_name][host_name][0] or 1
+            elif puertos_dict.get(host_name, {}).get(switch_name):
+                port_host = puertos_dict[host_name][switch_name][1] or 1
+
+            host_to_switch_map[row['mac']] = {
+                'dpid': dpid,
+                'port': port_host,
+                'ip':   row['ip'],
+                'name': host_name
+            }
 
         logger.info(f"Topología cargada con {len(network_graph)} switches.")
-        for dpid, neighbors in network_graph.items():
-            logger.debug(f"Switch {dpid} ({switches_by_dpid.get(dpid, 'Unknown')}): conexiones -> {list(neighbors.keys())}")
-
     except Exception as e:
         logger.error(f"Error al cargar topología: {e}")
     finally:
-        if conn:
-            conn.close()
-
-
-@dijkstra_bp.route('/calculate_path', methods=['POST'])
-def calculate_path_endpoint():
-    data = request.get_json()
-    src_mac = data.get('src_mac')
-    dst_mac = data.get('dst_mac')
-
-    src_info = host_to_switch_map.get(src_mac)
-    dst_info = host_to_switch_map.get(dst_mac)
-
-    if not src_info or not dst_info:
-        return jsonify({"error": "MAC de origen o destino no encontrados"}), 400
-
-    src_dpid = src_info['dpid']
-    dst_dpid = dst_info['dpid']
-    dst_port = dst_info['port']
-
-    if src_dpid == dst_dpid:
-        return jsonify({
-            "path": [{
-                "dpid": src_dpid,
-                "out_port": dst_port,
-                "in_port": None
-            }]
-        }), 200
-
-    path = calculate_dijkstra_path(src_dpid, dst_dpid)
-
-    if not path:
-        return jsonify({"error": "Ruta no encontrada"}), 404
-
-    formatted_path = []
-
-    for i in range(len(path)):
-        dpid, _, _ = path[i]
-        entry = {"dpid": dpid}
-
-        if i == 0:
-            if len(path) > 1:
-                next_hop_dpid = path[i+1][0]
-                link = network_graph[dpid].get(next_hop_dpid)
-                entry["out_port"] = link["port_out"] if link else -1
-            else:
-                entry["out_port"] = dst_port
-            entry["in_port"] = None
-        else:
-            prev_dpid = path[i-1][0]
-            link = network_graph[prev_dpid].get(dpid)
-            entry["in_port"] = link["port_in_neighbor"] if link else -1
-
-            if i < len(path) - 1:
-                next_hop_dpid = path[i+1][0]
-                link = network_graph[dpid].get(next_hop_dpid)
-                entry["out_port"] = link["port_out"] if link else -1
-            else:
-                entry["out_port"] = dst_port
-
-        formatted_path.append(entry)
-
-    return jsonify({"path": formatted_path}), 200
+        conn.close()
 
 
 def calculate_dijkstra_path(start_dpid, end_dpid):
+    """
+    Dijkstra minimizando la suma de (1/ancho_banda) en cada enlace.
+    Devuelve una lista de tuplas: [(dpid0, None, None), (dpid1, port_out, port_in), ...].
+    """
     distances = {node: float('inf') for node in network_graph}
     distances[start_dpid] = 0
-    queue = [(0, start_dpid, [(start_dpid, None, None)])]
+    heap = [(0, start_dpid, [(start_dpid, None, None)])]
     visited = set()
 
-    while queue:
-        cost, current, path = heapq.heappop(queue)
+    while heap:
+        cost, current, path = heapq.heappop(heap)
         if current in visited:
             continue
         visited.add(current)
@@ -191,18 +202,141 @@ def calculate_dijkstra_path(start_dpid, end_dpid):
             return path
 
         for neighbor, link in network_graph[current].items():
-            if neighbor not in visited:
-                new_cost = cost + link['cost']
-                port_out = link.get('port_out')
-                port_in_neighbor = link.get('port_in_neighbor')
-
-                if port_out is None or port_in_neighbor is None:
-                    logger.warning(f"Puertos inválidos para el enlace entre {current} y {neighbor}. Omitiendo este enlace.")
-                    continue
-
-                heapq.heappush(queue, (new_cost, neighbor, path + [(neighbor, port_out, port_in_neighbor)]))
+            if neighbor in visited:
+                continue
+            new_cost = cost + link['cost']
+            if new_cost < distances[neighbor]:
+                distances[neighbor] = new_cost
+                po = link.get('port_out')
+                pi = link.get('port_in_neighbor')
+                new_path = path + [(neighbor, po, pi)]
+                heapq.heappush(heap, (new_cost, neighbor, new_path))
 
     return None
+
+
+def calculate_shortest_path(start_dpid, end_dpid):
+    """
+    BFS puro: encuentra ruta con menor número de saltos.
+    Devuelve lista de tuplas [(dpid0, None, None), (dpid1, port_out, port_in), ...].
+    """
+    visited = {start_dpid}
+    queue = collections.deque()
+    queue.append([(start_dpid, None, None)])
+
+    while queue:
+        path = queue.popleft()
+        current = path[-1][0]
+
+        if current == end_dpid:
+            return path
+
+        for neighbor, link in network_graph[current].items():
+            if neighbor not in visited:
+                visited.add(neighbor)
+                po = link.get('port_out')
+                pi = link.get('port_in_neighbor')
+                new_path = path + [(neighbor, po, pi)]
+                queue.append(new_path)
+
+    return None
+
+
+@dijkstra_bp.route('/calculate_path', methods=['POST'])
+def calculate_path_endpoint():
+    """
+    Espera JSON:
+      { "src_mac": "AA:BB:CC:DD:EE:FF", "dst_mac": "11:22:33:44:55:66" }
+    Lee 'algoritmo_enrutamiento' de la tabla configuracion:
+      - "dijkstra"       → calculate_dijkstra_path
+      - "shortest_path"  → calculate_shortest_path
+    Reconstruye la ruta en la misma estructura que el código original:
+      [ { "dpid":..., "out_port":..., "in_port":... }, ... ]
+    """
+    data = request.get_json(force=True)
+    src_mac = data.get('src_mac')
+    dst_mac = data.get('dst_mac')
+    load_topology()
+    
+    src_info = host_to_switch_map.get(src_mac)
+    dst_info = host_to_switch_map.get(dst_mac)
+    if not src_info or not dst_info:
+        return jsonify({"error": "MAC de origen o destino no encontrados"}), 400
+
+    src_dpid = src_info['dpid']
+    dst_dpid = dst_info['dpid']
+    dst_port = dst_info['port']
+
+    # 1) Leer algoritmo de la tabla 'configuracion'
+    algoritmo = 'dijkstra'
+    conn = _get_db_connection()
+    if conn:
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute(
+                "SELECT algoritmo_enrutamiento "
+                "FROM configuracion "
+                "ORDER BY fecha_activacion DESC "
+                "LIMIT 1"
+            )
+            row = cur.fetchone()
+            if row:
+                alg = row['algoritmo_enrutamiento']
+                if alg in ['dijkstra', 'shortest_path']:
+                    algoritmo = alg
+                else:
+                    print(
+                        f"[WARNING] Algoritmo desconocido en configuracion: {alg}. Usando 'dijkstra'."
+                    )
+            cur.close()
+        except Exception as e:
+            print(f"[ERROR] Error al leer configuracion: {e}")
+        finally:
+            conn.close()
+    print(f"Usando algoritmo de enrutamiento: {algoritmo}")
+    # 2) Calcular ruta según algoritmo
+    if algoritmo == 'shortest_path':
+        raw_path = calculate_shortest_path(src_dpid, dst_dpid)
+    else:
+        raw_path = calculate_dijkstra_path(src_dpid, dst_dpid)
+
+    if raw_path is None:
+        return jsonify({"error": "No se encontró camino entre los nodos."}), 404
+
+    # 3) Reconstruir en la misma estructura original
+    formatted_path = []
+    # raw_path = [(dpid0,None,None), (dpid1, port_out, port_in), ...]
+    for i in range(len(raw_path)):
+        dpid, out_p, in_p = raw_path[i]
+        entry = {"dpid": dpid}
+
+        if i == 0:
+            # Primer salto: no hay in_port
+            entry["in_port"] = None
+            if len(raw_path) > 1:
+                # Puerto de salida es port_out del primer enlace
+                next_dpid = raw_path[i+1][0]
+                link = network_graph.get(dpid, {}).get(next_dpid)
+                entry["out_port"] = link["port_out"] if link else -1
+            else:
+                # Si start == end, salta directo al host
+                entry["out_port"] = dst_port
+        else:
+            # Para i > 0, in_port viene de raw_path[i][2]
+            entry["in_port"] = in_p if in_p is not None else -1
+
+            if i < len(raw_path) - 1:
+                # Puerto de salida hacia el siguiente switch
+                next_dpid = raw_path[i+1][0]
+                link_next = network_graph.get(dpid, {}).get(next_dpid)
+                entry["out_port"] = link_next["port_out"] if link_next else -1
+            else:
+                # Último salto: el puerto de salida es el puerto del host destino
+                entry["out_port"] = dst_port
+
+        formatted_path.append(entry)
+
+    return jsonify({"path": formatted_path}), 200
 
 
 @dijkstra_bp.route('/calculate_multicast_tree', methods=['POST'])
@@ -221,69 +355,67 @@ def calculate_multicast_tree():
         }
       }
 
-    Modificado para extraer correctamente el puerto de salida de cada salto
-    a partir del grafo network_graph, evitando que el switch fuente reciba None.
-    Además inyecta cada leaf (cliente) con su puerto de host.
+    Usa Dijkstra para calcular rutas desde source_dpid a cada member_dpid.
+    Extrae puertos intermedios del grafo `network_graph`.
+    Inyecta también el puerto de salida hacia los hosts finales.
     """
-    data = request.get_json()
+    data = request.get_json(force=True)
     source_dpid = data.get('source_dpid')
     member_dpids = data.get('member_dpids')
 
-    if source_dpid is None or not member_dpids:
-        return jsonify({"error": "source_dpid o member_dpids faltantes"}), 400
+    if source_dpid is None or not isinstance(member_dpids, list) or not member_dpids:
+        return jsonify({"error": "source_dpid o member_dpids faltantes o mal formateados"}), 400
 
+    load_topology()  # Asegurarnos de tener la topología más reciente
     tree = {}
 
-    # 1) Construir árbol basado en Dijkstra para cada miembro (sin leafs)
     for dst_dpid in member_dpids:
-        path = calculate_dijkstra_path(source_dpid, dst_dpid)
-        if not path:
-            # Saltar si no hay ruta hacia este miembro
+        if not isinstance(dst_dpid, int):
             continue
 
-        # Para cada par de saltos (current -> next_hop) en la ruta:
+        path = calculate_dijkstra_path(source_dpid, dst_dpid)
+        if not path:
+            continue
+
         for i in range(len(path) - 1):
             current_dpid = path[i][0]
-            next_hop_dpid = path[i + 1][0]
+            next_dpid = path[i + 1][0]
 
-            enlace = network_graph.get(current_dpid, {}).get(next_hop_dpid)
+            enlace = network_graph.get(current_dpid, {}).get(next_dpid)
             if not enlace:
-                logger.warning(f"Enlace no encontrado en grafo: {current_dpid} → {next_hop_dpid}")
+                logger.warning(f"Enlace no encontrado: {current_dpid} → {next_dpid}")
                 continue
 
             port_out = enlace.get('port_out')
-            if port_out is None:
-                logger.warning(f"Puerto de salida nulo en enlace: {current_dpid} → {next_hop_dpid}")
+            if not isinstance(port_out, int) or port_out <= 0:
+                logger.warning(f"Puerto de salida inválido: {current_dpid} → {next_dpid}")
                 continue
 
-            # Agregar port_out al set de puertos de current_dpid
-            if current_dpid not in tree:
-                tree[current_dpid] = set()
-            tree[current_dpid].add(port_out)
+            tree.setdefault(current_dpid, set()).add(port_out)
 
-    # 2) Convertir sets a listas y claves a strings para JSON
+    # Convertir a formato serializable
     serialized_tree = {str(dpid): list(ports) for dpid, ports in tree.items()}
 
-    # 3) Inyectar cada leaf (cliente) con su puerto de salida hacia el host
+    # Agregar puerto final hacia cada host conectado a member_dpid (hojas)
     for leaf_dpid in member_dpids:
         leaf_str = str(leaf_dpid)
         if leaf_str in serialized_tree:
             continue
 
-        # Buscar en host_to_switch_map algún host conectado a leaf_dpid
         port_cliente = None
         for mac, info in host_to_switch_map.items():
             if info.get('dpid') == leaf_dpid:
                 port_cliente = info.get('port')
                 break
 
-        if port_cliente is None or not isinstance(port_cliente, int) or port_cliente <= 0:
-            # Si no encontramos puerto, dejamos lista vacía para que el controlador haga fallback
+        if not isinstance(port_cliente, int) or port_cliente <= 0:
             serialized_tree.setdefault(leaf_str, [])
         else:
             serialized_tree[leaf_str] = [port_cliente]
 
     return jsonify({"tree": serialized_tree}), 200
 
-# Cargar topología al iniciar
+
+
+# Cargar la topología al iniciar
 load_topology()

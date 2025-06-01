@@ -110,63 +110,11 @@ async function handleRemoveServer(event) {
     });
 }
 
-// Las funciones showChangeVideoModal, closeModal, confirmVideoChange, startVideoFromUI, removeAsServer
-// del servers.js original no son directamente usadas por el HTML actual,
-// pero se mantienen aquí por si se reintroduce la tabla de gestión de servidores con esos botones.
-// Si no se usan, pueden ser eliminadas.
+document.addEventListener('DOMContentLoaded', () => {
+  loadActiveServers(); // Cargar inicialmente
 
-// Función para reiniciar un servidor (cuando estaba inactivo en la tabla de activos)
-// Esta función asume que hay un endpoint para "iniciar" un servidor existente.
-/*
-async function startVideoFromUI(host, video_path, ip_destino, puerto) {
-    try {
-        const response = await fetch(`${API_BASE_URL}/servers/add`, { // Reutilizamos /servers/add para "reiniciar"
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ host_name: host, video_path: video_path, ip_destino: ip_destino, puerto: puerto, server_weight: 1 }) // Asume peso 1
-        });
-        const data = await response.json();
-        if (response.ok) {
-            showMessageModal('Éxito', `Servidor ${host} reiniciado. IP Multicast: ${data.multicast_ip}:${data.multicast_port}`);
-            loadActiveServers();
-            updateDashboard();
-        } else {
-            showMessageModal('Error', `Error al reiniciar servidor: ${data.error}`);
-        }
-    } catch (error) {
-        console.error('Error reiniciando servidor:', error);
-        showMessageModal('Error', 'Error de conexión al reiniciar el servidor.');
-    }
-}
-*/
-
-// Función para detener un servidor de video (si se usa un botón de "detener" individual)
-/*
-async function stopVideoServer(host) {
-    showMessageModal(
-        'Confirmar Detención',
-        `¿Estás seguro de que quieres detener el servidor de video en ${host}?`,
-        true,
-        async () => {
-            try {
-                const response = await fetch(`${API_BASE_URL}/servers/remove`, { // Reutilizamos /servers/remove para "detener"
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ host_name: host })
-                });
-                const data = await response.json();
-                if (response.ok) {
-                    showMessageModal('Éxito', data.message);
-                    loadActiveServers();
-                    updateDashboard();
-                } else {
-                    showMessageModal('Error', `Error al detener servidor: ${data.error}`);
-                }
-            } catch (error) {
-                console.error('Error deteniendo servidor:', error);
-                showMessageModal('Error', 'Error de conexión al detener el servidor.');
-            }
-        }
-    );
-}
-*/
+  // Refrescar la tabla de servidores cada 10 segundos
+  setInterval(() => {
+    loadActiveServers();
+  }, 10000);
+});

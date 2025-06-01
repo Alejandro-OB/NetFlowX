@@ -228,6 +228,19 @@ ALTER SEQUENCE public.hosts_id_host_seq OWNED BY public.hosts.id_host;
 
 
 --
+-- Name: igmp_memberships; Type: TABLE; Schema: public; Owner: geant_user
+--
+
+CREATE TABLE public.igmp_memberships (
+    group_ip character varying NOT NULL,
+    dpid integer NOT NULL,
+    in_port integer NOT NULL
+);
+
+
+ALTER TABLE public.igmp_memberships OWNER TO geant_user;
+
+--
 -- Name: logs; Type: TABLE; Schema: public; Owner: geant_user
 --
 
@@ -294,7 +307,11 @@ CREATE TABLE public.puertos (
     nodo_origen character varying NOT NULL,
     nodo_destino character varying NOT NULL,
     puerto_origen integer NOT NULL,
-    puerto_destino integer
+    puerto_destino integer,
+    id_origen_switch integer,
+    id_destino_switch integer,
+    id_origen_host integer,
+    id_destino_host integer
 );
 
 
@@ -633,6 +650,14 @@ ALTER TABLE ONLY public.hosts
 
 
 --
+-- Name: igmp_memberships igmp_memberships_pkey; Type: CONSTRAINT; Schema: public; Owner: geant_user
+--
+
+ALTER TABLE ONLY public.igmp_memberships
+    ADD CONSTRAINT igmp_memberships_pkey PRIMARY KEY (group_ip, dpid, in_port);
+
+
+--
 -- Name: logs logs_pkey; Type: CONSTRAINT; Schema: public; Owner: geant_user
 --
 
@@ -779,6 +804,38 @@ ALTER TABLE ONLY public.hosts
 
 ALTER TABLE ONLY public.pesos_servidores
     ADD CONSTRAINT pesos_servidores_id_host_fkey FOREIGN KEY (id_host) REFERENCES public.hosts(id_host);
+
+
+--
+-- Name: puertos puertos_fk_destino_host; Type: FK CONSTRAINT; Schema: public; Owner: geant_user
+--
+
+ALTER TABLE ONLY public.puertos
+    ADD CONSTRAINT puertos_fk_destino_host FOREIGN KEY (id_destino_host) REFERENCES public.hosts(id_host);
+
+
+--
+-- Name: puertos puertos_fk_destino_switch; Type: FK CONSTRAINT; Schema: public; Owner: geant_user
+--
+
+ALTER TABLE ONLY public.puertos
+    ADD CONSTRAINT puertos_fk_destino_switch FOREIGN KEY (id_destino_switch) REFERENCES public.switches(id_switch);
+
+
+--
+-- Name: puertos puertos_fk_origen_host; Type: FK CONSTRAINT; Schema: public; Owner: geant_user
+--
+
+ALTER TABLE ONLY public.puertos
+    ADD CONSTRAINT puertos_fk_origen_host FOREIGN KEY (id_origen_host) REFERENCES public.hosts(id_host);
+
+
+--
+-- Name: puertos puertos_fk_origen_switch; Type: FK CONSTRAINT; Schema: public; Owner: geant_user
+--
+
+ALTER TABLE ONLY public.puertos
+    ADD CONSTRAINT puertos_fk_origen_switch FOREIGN KEY (id_origen_switch) REFERENCES public.switches(id_switch);
 
 
 --

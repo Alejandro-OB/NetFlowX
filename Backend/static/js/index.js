@@ -1,18 +1,16 @@
 // --- index.js ---
-// Funciones que NO tienen que ver con la topología (dashboard, config, link management, stats, logs, etc.)
 
 // ==============================
 //  Constantes Globales
 // ==============================
 const API_BASE_URL      = 'http://192.168.18.151:5000';
-const MININET_AGENT_URL = 'http://192.168.18.208:5002';
+const MININET_AGENT_URL = 'http://192.168.18.208:5002';  // ya no se usa en este archivo
 
 // ==============================
 //  Función auxiliar para mostrar modales
 //  (Se reutiliza la misma de topology.js si ambos archivos están cargados.)
 // ==============================
 function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
-  // Reutilizamos la misma implementación que en topology.js
   const modal       = document.getElementById('message-modal');
   const titleElem   = document.getElementById('message-modal-title');
   const contentElem = document.getElementById('message-modal-content');
@@ -86,7 +84,6 @@ async function updateDashboard() {
 
     // 3) Actualizar estado del controlador (conexión con switches)
     await updateControllerStatus();
-
   } catch (err) {
     console.error('Error updateDashboard():', err);
     showMessageModal('Error', `No se pudo actualizar el dashboard: ${err.message}`);
@@ -109,7 +106,6 @@ async function updateControllerStatus() {
 
     statusElem.textContent = connected ? 'Conectado' : 'Desconectado';
     statusElem.className   = connected ? 'text-green-700' : 'text-red-700';
-
   } catch (err) {
     console.error('Error updateControllerStatus():', err);
     statusElem.textContent = 'Error de Conexión';
@@ -176,7 +172,6 @@ document.getElementById('save-lb-algo')?.addEventListener('click', async () => {
     showMessageModal('Éxito', 'Algoritmo de balanceo guardado correctamente.');
     updateDashboard();
     loadConfigHistory();
-
   } catch (err) {
     console.error('Error al guardar LB:', err);
     statusMsg.textContent = err.message;
@@ -211,7 +206,6 @@ document.getElementById('save-routing-algo')?.addEventListener('click', async ()
     showMessageModal('Éxito', 'Algoritmo de enrutamiento guardado correctamente.');
     updateDashboard();
     loadConfigHistory();
-
   } catch (err) {
     console.error('Error al guardar Routing:', err);
     statusMsg.textContent = err.message;
@@ -219,18 +213,6 @@ document.getElementById('save-routing-algo')?.addEventListener('click', async ()
     showMessageModal('Error', `No se pudo guardar el algoritmo de enrutamiento: ${err.message}`);
   }
 });
-
-// =======================================
-//  Función auxiliar para color de enlace
-//  (Repetida aquí solo si la necesitas
-//   en secciones que no importen topology.js)
-// =======================================
-function colorPorAnchoBandaGlobal(bw) {
-  if (bw >= 1000) return 'green';
-  if (bw >= 100)  return 'yellow';
-  if (bw >= 10)   return 'orange';
-  return 'red';
-}
 
 // =======================================
 //  Gestión de SWITCHES para formularios de enlaces
@@ -247,7 +229,6 @@ async function loadSwitchesForLinks() {
     const topoData = await res.json();
     allSwitches = Array.isArray(topoData.switches) ? topoData.switches : [];
     populateLinkDropdowns(allSwitches);
-
   } catch (err) {
     console.error('Error loadSwitchesForLinks():', err);
     showMessageModal('Error', `No se pudieron cargar los switches para enlaces: ${err.message}`);
@@ -270,9 +251,9 @@ function populateLinkDropdowns(switches) {
   });
 }
 
-// =======================================
-//  Cargar enlaces activos en tabla
-// =======================================
+// =========================================
+//  Cargar enlaces activos y asociar acciones
+// =========================================
 async function loadActiveLinks() {
   try {
     const res = await fetch(`${API_BASE_URL}/topology/get`);
@@ -362,54 +343,59 @@ async function loadActiveLinks() {
   }
 }
 
+
 // =========================================
 //  Crear un nuevo enlace (POST)
 // =========================================
 document.getElementById('create-link-btn')?.addEventListener('click', async () => {
-  const origenId = document.getElementById('new-link-origen')?.value;
-  const destinoId = document.getElementById('new-link-destino')?.value;
-  const bw = document.getElementById('new-link-bw')?.value;
+  const origenId  = document.getElementById('new-link-origen').value;
+  const destinoId = document.getElementById('new-link-destino').value;
+  const bw        = document.getElementById('new-link-bw').value;
   const statusMsg = document.getElementById('create-link-status-message');
 
   if (!origenId || !destinoId || !bw) {
     statusMsg.textContent = 'Por favor completa todos los campos.';
-    statusMsg.className = 'mt-2 text-sm text-red-600';
+    statusMsg.className   = 'mt-2 text-sm text-red-600';
     return;
   }
   if (origenId === destinoId) {
     statusMsg.textContent = 'El origen y destino no pueden ser el mismo switch.';
-    statusMsg.className = 'mt-2 text-sm text-red-600';
+    statusMsg.className   = 'mt-2 text-sm text-red-600';
     return;
   }
 
   try {
+    // 1) Crear enlace en la API central (el backend llamará a /mininet/add_link)
     const res = await fetch(`${API_BASE_URL}/topology/enlace`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        id_origen:  parseInt(origenId, 10),
-        id_destino: parseInt(destinoId, 10),
+        id_origen:   parseInt(origenId,  10),
+        id_destino:  parseInt(destinoId, 10),
         ancho_banda: parseInt(bw, 10)
       })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || data.message || 'Unknown error');
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || result.message || 'Error al crear enlace en la BD.');
 
-    statusMsg.textContent = data.message || 'Enlace creado exitosamente.';
+    // 2) Informar éxito en la UI
+    statusMsg.textContent = result.message || 'Enlace creado correctamente.';
     statusMsg.className   = 'mt-2 text-sm text-green-600';
-    showMessageModal('Éxito', data.message || 'Enlace creado exitosamente.');
 
-    // Refrescar topología y lista de enlaces
+    // 3) Si el backend incluyó mensaje del agente, mostrarlo
+    if (result.agent && result.agent.message) {
+      showMessageModal('Mininet Agent', result.agent.message);
+    }
+
+    // 4) Refrescar la vista de la topología y los enlaces
     loadTopology();
     loadActiveLinks();
 
-    // Limpiar formularios
+    // 5) Limpiar formulario
     document.getElementById('new-link-origen').value  = '';
     document.getElementById('new-link-destino').value = '';
     document.getElementById('new-link-bw').value       = '';
-
   } catch (err) {
-    console.error('Error create-link:', err);
     statusMsg.textContent = err.message;
     statusMsg.className   = 'mt-2 text-sm text-red-600';
     showMessageModal('Error', `No se pudo crear el enlace: ${err.message}`);
@@ -426,6 +412,7 @@ async function deleteLink(origenId, destinoId, origenName, destinoName) {
     true,
     async () => {
       try {
+        // 1) Llamar a DELETE /topology/enlace (el backend llamará a /mininet/delete_link)
         const res = await fetch(`${API_BASE_URL}/topology/enlace`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
@@ -437,10 +424,12 @@ async function deleteLink(origenId, destinoId, origenName, destinoName) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || data.message || 'Unknown error');
 
+        // 2) Mostrar mensaje de éxito
         showMessageModal('Éxito', data.message || 'Enlace eliminado exitosamente.');
+
+        // 4) Refrescar vista
         loadTopology();
         loadActiveLinks();
-
       } catch (err) {
         console.error('Error deleteLink():', err);
         showMessageModal('Error', `No se pudo eliminar el enlace: ${err.message}`);
@@ -452,51 +441,107 @@ async function deleteLink(origenId, destinoId, origenName, destinoName) {
 // =========================================
 //  Abrir modal para editar un enlace
 // =========================================
-function openEditLinkModal(origenId, destinoId, bw, origenName, destinoName) {
-  document.getElementById('edit-link-origen-display').value  = origenName;
-  document.getElementById('edit-link-destino-display').value = destinoName;
-  document.getElementById('edit-link-bw-input').value       = bw;
-  document.getElementById('edit-link-origen-id').value      = origenId;
-  document.getElementById('edit-link-destino-id').value     = destinoId;
-  document.getElementById('edit-link-modal').classList.remove('hidden');
+async function openEditLinkModal(origenId, destinoId, bw) {
+  origenId  = parseInt(origenId, 10);
+  destinoId = parseInt(destinoId, 10);
+
+  const origenSelect  = document.getElementById('edit-link-new-origen-id');
+  const destinoSelect = document.getElementById('edit-link-new-destino-id');
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/topology/get`);
+    if (!res.ok) throw new Error('No se pudo cargar switches.');
+    const topoData = await res.json();
+
+    origenSelect.innerHTML  = `<option value="">Seleccionar</option>`;
+    destinoSelect.innerHTML = `<option value="">Seleccionar</option>`;
+
+    topoData.switches.forEach(sw => {
+      const optOrigen = document.createElement('option');
+      optOrigen.value = sw.id_switch;
+      optOrigen.textContent = sw.nombre;
+      if (sw.id_switch === origenId) optOrigen.selected = true;
+      origenSelect.appendChild(optOrigen);
+
+      const optDestino = document.createElement('option');
+      optDestino.value = sw.id_switch;
+      optDestino.textContent = sw.nombre;
+      if (sw.id_switch === destinoId) optDestino.selected = true;
+      destinoSelect.appendChild(optDestino);
+    });
+
+    document.getElementById('edit-link-origen-id').value  = origenId;
+    document.getElementById('edit-link-destino-id').value = destinoId;
+    document.getElementById('edit-link-bw-input').value   = bw;
+
+    document.getElementById('edit-link-modal')?.classList.remove('hidden');
+  } catch (err) {
+    console.error('Error en openEditLinkModal:', err);
+    showMessageModal('Error', `Error al cargar datos del enlace: ${err.message}`);
+  }
 }
 
-// Cerrar modal de edición
 document.getElementById('cancel-edit-link-btn')?.addEventListener('click', () => {
   document.getElementById('edit-link-modal')?.classList.add('hidden');
 });
+
 
 // =========================================
 //  Guardar cambios de enlace (PUT)
 // =========================================
 document.getElementById('save-edited-link-btn')?.addEventListener('click', async () => {
-  const origenId  = document.getElementById('edit-link-origen-id')?.value;
-  const destinoId = document.getElementById('edit-link-destino-id')?.value;
-  const newBw     = document.getElementById('edit-link-bw-input')?.value;
+  const oldOrigenId  = parseInt(document.getElementById('edit-link-origen-id')?.value, 10);
+  const oldDestinoId = parseInt(document.getElementById('edit-link-destino-id')?.value, 10);
+  const newBw        = document.getElementById('edit-link-bw-input')?.value;
+  const newOrigenId  = parseInt(document.getElementById('edit-link-new-origen-id')?.value, 10);
+  const newDestinoId = parseInt(document.getElementById('edit-link-new-destino-id')?.value, 10);
 
+  // Validaciones básicas
   if (!newBw || isNaN(newBw) || parseInt(newBw, 10) <= 0) {
-    showMessageModal('Advertencia', 'El ancho de banda debe ser un número positivo.');
+    showMessageModal('Error', 'Ingresa un ancho de banda válido.');
+    return;
+  }
+  if (newOrigenId === newDestinoId) {
+    showMessageModal('Error', 'El origen y destino no pueden ser el mismo switch.');
     return;
   }
 
   try {
+    // Construir payload para el backend
+    const payload = {
+      id_origen:   newOrigenId,
+      id_destino:  newDestinoId,
+      ancho_banda: parseInt(newBw, 10)
+    };
+
+    // Si cambiaron switches, enviamos old_id_origen/old_id_destino
+    if (newOrigenId !== oldOrigenId || newDestinoId !== oldDestinoId) {
+      payload.old_id_origen  = oldOrigenId;
+      payload.old_id_destino = oldDestinoId;
+    } else {
+      // Si no cambiaron switches, podemos enviar old_ = new_
+      payload.old_id_origen  = newOrigenId;
+      payload.old_id_destino = newDestinoId;
+    }
+
+    // Llamar a PUT /topology/enlace (el backend llamará a /mininet/update_link)
     const res = await fetch(`${API_BASE_URL}/topology/enlace`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id_origen:  parseInt(origenId, 10),
-        id_destino: parseInt(destinoId, 10),
-        ancho_banda: parseInt(newBw, 10)
-      })
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || data.message || 'Unknown error');
 
+    // Mostrar mensaje de éxito
     showMessageModal('Éxito', data.message || 'Enlace actualizado exitosamente.');
+
+    
+
+    // Cerrar modal y refrescar vista
     document.getElementById('edit-link-modal')?.classList.add('hidden');
     loadTopology();
     loadActiveLinks();
-
   } catch (err) {
     console.error('Error save-edited-link:', err);
     showMessageModal('Error', `No se pudo actualizar el enlace: ${err.message}`);
@@ -525,10 +570,9 @@ async function cargarEstadisticas() {
         <td class="p-2">${row.total}</td>`;
       tbody.appendChild(tr);
     });
-
   } catch (err) {
     console.error('Error cargarEstadisticas():', err);
-    // showMessageModal('Error', `No se pudieron cargar las estadísticas: ${err.message}`);
+    // Opcional: mostrar modal de error
   }
 }
 
@@ -552,33 +596,21 @@ async function cargarLogs() {
       li.innerHTML = `<span class="font-semibold text-blue-600">${log.origen}</span> - ${log.tipo_evento} - ${log.fecha}`;
       list.appendChild(li);
     });
-
   } catch (err) {
     console.error('Error cargarLogs():', err);
-    // showMessageModal('Error', `No se pudieron cargar los logs: ${err.message}`);
+    // Opcional: mostrar modal de error
   }
 }
 
 // =======================================
-//  Inicialización general al cargar la página
+//  Inicialización al cargar la página
 // =======================================
 document.addEventListener('DOMContentLoaded', () => {
-  // 1) Topología (se cargará automáticamente en topology.js)
-  //    No es necesario llamarla aquí, pues topology.js ya lo hace en su DOMContentLoaded.
-
-  // 2) DASHBOARD
   updateDashboard();
-  setInterval(updateDashboard, 5000);
-
-  // 3) Historial de configuración
-  loadConfigHistory();
-
-  // 4) Gestión de enlaces
   loadSwitchesForLinks();
+  loadTopology();
   loadActiveLinks();
-  setInterval(loadActiveLinks, 10000);
-
-  // 5) Estadísticas y Logs (si tienes secciones en tu HTML para ellos)
   cargarEstadisticas();
   cargarLogs();
+  loadConfigHistory();
 });
