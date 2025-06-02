@@ -59,30 +59,40 @@
     <div id="mapa-topologia"
         class="w-full h-[600px] rounded-lg shadow-inner border border-gray-300"> </div>
 
-    <div class="flex flex-col md:flex-row items-center justify-between mt-6 gap-4">
-      <button id="btn-ping"
-        class="bg-gradient-to-r from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-200 ease-in-out">
-        Enviar paquete
-      </button>
+      <div class="flex flex-col items-center gap-4 mt-6">
+        <div class="flex flex-wrap justify-center gap-4">
+          <!-- Botón Ping -->
+          <button id="btn-ping"
+            class="bg-gradient-to-r from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled>
+            Enviar paquete
+          </button>
 
-      <div id="ping-container"
+          <!-- Botones siempre visibles -->
+          <button id="btn-iniciar-servidor"
+            class="bg-gradient-to-r from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled>
+            Iniciar como Servidor
+          </button>
+
+          <button id="btn-iniciar-cliente"
+            class="bg-gradient-to-r from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled>
+            Iniciar como Cliente
+          </button>
+        </div>
+
+        <!-- Resultado del ping -->
+        <div id="ping-container"
           class="w-full md:w-2/3 p-4 bg-black text-green-400 font-mono text-sm rounded-lg shadow-inner max-h-64 overflow-y-auto border border-green-600">
-        <div id="ping-output" class="whitespace-pre-line">
-          Esperando resultado del ping...
+          <div id="ping-output" class="whitespace-pre-line">
+            Esperando resultado del ping...
+          </div>
         </div>
       </div>
+
     </div>
 
-    <div id="acciones-host-seleccionado" class="flex gap-4 mt-4 hidden">
-      <button id="btn-iniciar-servidor"
-              class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-        Iniciar como Servidor
-      </button>
-      <button id="btn-iniciar-cliente"
-              class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-        Iniciar como Cliente
-      </button>
-    </div>
 
   </section>
 

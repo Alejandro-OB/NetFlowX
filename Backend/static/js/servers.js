@@ -1,15 +1,5 @@
-// Las constantes API_BASE_URL y MININET_AGENT_URL se asumen globales desde index.js
-// Variable para almacenar el ID del host_name que se está editando en el modal
 let currentHostForChange = null;
 
-// Cargar hosts disponibles y servidores activos al iniciar
-document.addEventListener('DOMContentLoaded', () => {
-  // fetchHosts(); // Ahora se llama desde clients.js si es necesario para el selector de cliente
-  loadActiveServers(); // Cargar servidores activos
-});
-
-
-// Obtener servidores activos (procesos ffmpeg)
 async function loadActiveServers() {
   try {
     const response = await fetch(`${API_BASE_URL}/servers/active_servers`);
@@ -45,46 +35,65 @@ async function loadActiveServers() {
   }
 }
 
+async function lanzarServidor({ hostName, videoPath, peso = 1 }) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/servers/add`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        host_name: hostName,
+        video_path: videoPath,
+        server_weight: peso
+      })
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      showMessageModal('Éxito', `Servidor ${hostName} activado. IP Multicast: ${data.multicast_ip}:${data.multicast_port}`);
+      loadActiveServers?.();
+      updateDashboard?.();
+      cerrarModal?.(); // ✅ CIERRA el modal si existe
+      return { success: true, message: data.message };
+    } else {
+      showMessageModal('Error', `Error al activar servidor: ${data.error}`);
+      return { success: false, message: data.error };
+    }
+  } catch (error) {
+    console.error('Error lanzando servidor:', error);
+    showMessageModal('Error', 'Error de conexión al activar el servidor.');
+    return { success: false, message: 'Error de conexión con el servidor.' };
+  }
+}
+
+
+
 document.getElementById('add-server-btn').addEventListener('click', async () => {
-    const hostName = document.getElementById('server-host-name').value;
-    const videoPath = document.getElementById('server-video-path').value;
-    const serverWeight = parseInt(document.getElementById('server-weight').value);
-    const statusMessage = document.getElementById('server-status-message');
+  const hostName = document.getElementById('server-host-name').value;
+  const videoPath = document.getElementById('server-video-path').value;
+  const serverWeight = parseInt(document.getElementById('server-weight').value);
+  const statusMessage = document.getElementById('server-status-message');
 
-    if (!hostName || !videoPath || isNaN(serverWeight) || serverWeight < 1) {
-        statusMessage.textContent = 'Por favor, completa todos los campos y asegúrate de que el peso sea un número positivo.';
-        statusMessage.className = 'mt-2 text-sm text-red-600';
-        return;
-    }
+  if (!hostName || !videoPath || isNaN(serverWeight) || serverWeight < 1) {
+    statusMessage.textContent = 'Por favor, completa todos los campos y asegúrate de que el peso sea un número positivo.';
+    statusMessage.className = 'mt-2 text-sm text-red-600';
+    return;
+  }
 
-    try {
-        const response = await fetch(`${API_BASE_URL}/servers/add`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ host_name: hostName, video_path: videoPath, server_weight: serverWeight })
-        });
-        const data = await response.json();
-        if (response.ok) {
-            statusMessage.textContent = data.message;
-            statusMessage.className = 'mt-2 text-sm text-green-600';
-            showMessageModal('Éxito', `Servidor ${hostName} activado. IP Multicast: ${data.multicast_ip}:${data.multicast_port}`);
-            document.getElementById('server-host-name').value = '';
-            document.getElementById('server-video-path').value = '';
-            document.getElementById('server-weight').value = '1';
-            loadActiveServers();
-            updateDashboard(); 
-        } else {
-            statusMessage.textContent = data.error;
-            statusMessage.className = 'mt-2 text-sm text-red-600';
-            showMessageModal('Error', `Error al activar servidor: ${data.error}`);
-        }
-    } catch (error) {
-        console.error('Error añadiendo servidor:', error);
-        statusMessage.textContent = 'Error de conexión con el servidor.';
-        statusMessage.className = 'mt-2 text-sm text-red-600';
-        showMessageModal('Error', 'Error de conexión al activar el servidor.');
-    }
+  const result = await lanzarServidor({ hostName, videoPath, peso: serverWeight });
+
+  if (result.success) {
+    statusMessage.textContent = result.message;
+    statusMessage.className = 'mt-2 text-sm text-green-600';
+    document.getElementById('server-host-name').value = '';
+    document.getElementById('server-video-path').value = '';
+    document.getElementById('server-weight').value = '1';
+  } else {
+    statusMessage.textContent = result.message;
+    statusMessage.className = 'mt-2 text-sm text-red-600';
+  }
 });
+
 
 async function handleRemoveServer(event) {
     const hostName = event.target.dataset.hostName;
@@ -181,9 +190,6 @@ function cerrarModal() {
   const content = document.getElementById('modal-selector-servidor');
   const launchBtn = document.getElementById('btn-modal-launch-server');
   overlay.classList.remove('show');
-
-
-
   content.classList.remove('opacity-100', 'scale-100');
   content.classList.add('opacity-0', 'scale-95');
 
@@ -202,6 +208,7 @@ async function iniciarServidorDesdeModal() {
     showMessageModal('Error', 'Debes seleccionar un host desde la topología.');
     return;
   }
+
   if (!selectedVideoPath) {
     showMessageModal('Error', 'Debes seleccionar un video antes de iniciar el servidor.');
     return;
@@ -212,30 +219,9 @@ async function iniciarServidorDesdeModal() {
     ? parseInt(document.getElementById('modal-server-weight').value) || 1
     : 1;
 
-  try {
-    const response = await fetch(`${API_BASE_URL}/servers/add`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        host_name: host.name,
-        video_path: selectedVideoPath,
-        server_weight: peso
-      })
-    });
-    const data = await response.json();
-    if (response.ok) {
-      showMessageModal('Éxito', `Servidor ${host.name} iniciado. Multicast: ${data.multicast_ip}:${data.multicast_port}`);
-      loadActiveServers();
-      updateDashboard();
-      cerrarModal();
-    } else {
-      showMessageModal('Error', data.error || 'Error desconocido al iniciar servidor.');
-    }
-  } catch (err) {
-    console.error("Error iniciando servidor:", err);
-    showMessageModal('Error', 'Error de red al lanzar servidor.');
-  }
+  await lanzarServidor({ hostName: host.name, videoPath: selectedVideoPath, peso });
 }
+
 
 document.getElementById('btn-iniciar-servidor')?.addEventListener('click', () => {
   if (selectedHosts.length !== 1) {
@@ -259,35 +245,27 @@ document.getElementById('modal-selector-servidor-overlay')?.addEventListener('cl
 
 
 document.addEventListener('DOMContentLoaded', () => {
+  // 1. Carga inicial de datos
   loadActiveServers();
   verificarAlgoritmoBalanceo();
 
-  setInterval(() => {
-    const acciones = document.getElementById('acciones-host-seleccionado');
-    const btnSrv = document.getElementById('btn-iniciar-servidor');
-    const btnCli = document.getElementById('btn-iniciar-cliente');
-    if (!acciones || !btnSrv || !btnCli || typeof selectedHosts === 'undefined') return;
+  // 2. Listeners de botones
+  document.getElementById('btn-iniciar-servidor')?.addEventListener('click', () => {
+    abrirModalSeleccionVideo();
+  });
 
-    if (selectedHosts.length === 1) {
-      const host = selectedHosts[0];
-      acciones.classList.remove('hidden');
-      const yaServidor = window.servidoresActivos.includes(host.name);
-      btnSrv.disabled = yaServidor;
-      btnCli.disabled = yaServidor;
-    } else {
-      acciones.classList.add('hidden');
-    }
-  }, 500);
+  document.getElementById('btn-modal-launch-server')?.addEventListener('click', async () => {
+    await iniciarServidorDesdeModal();
+  });
 
   document.getElementById('btn-iniciar-cliente')?.addEventListener('click', async () => {
-    if (selectedHosts.length !== 1) {
+    if (!selectedHosts || selectedHosts.length !== 1) {
       showMessageModal('Error', 'Selecciona un único host desde la topología.');
       return;
     }
 
     const host = selectedHosts[0];
 
-    // Verifica si ya está en la lista de clientes activos
     if (window.activeFFplayClients?.some(client => client.host === host.name)) {
       showMessageModal('Advertencia', `El host ${host.name} ya tiene un cliente FFplay activo.`);
       return;
@@ -305,8 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         await startFFmpegClient(host.name, streamInfo);
       } else {
-        console.error("❌ Datos incompletos del backend:", data);
         showMessageModal("Error", "No se pudo obtener información completa del servidor.");
+        console.error("❌ Datos incompletos del backend:", data);
       }
     } catch (error) {
       console.error('Error solicitando información del stream:', error);
@@ -314,13 +292,35 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // 3. Cierre de modal con Escape o clic fuera
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') cerrarModal();
+  });
 
-});
+  document.getElementById('modal-selector-servidor-overlay')?.addEventListener('click', (e) => {
+    const modalContent = document.getElementById('modal-selector-servidor');
+    if (!modalContent.contains(e.target)) cerrarModal();
+  });
 
-document.addEventListener('DOMContentLoaded', () => {
-  loadActiveServers(); // Cargar inicialmente
+  // 4. Actualización continua del estado de botones
+  setInterval(() => {
+    const btnPing = document.getElementById('btn-ping');
+    const btnSrv = document.getElementById('btn-iniciar-servidor');
+    const btnCli = document.getElementById('btn-iniciar-cliente');
 
-  // Refrescar la tabla de servidores cada 10 segundos
+    if (!btnPing || !btnSrv || !btnCli || typeof selectedHosts === 'undefined') return;
+
+    // Habilitar solo si hay 2 hosts seleccionados
+    btnPing.disabled = selectedHosts.length !== 2;
+
+    // Habilitar servidor/cliente solo si hay 1 host seleccionado
+    const unHost = selectedHosts.length === 1;
+    btnSrv.disabled = !unHost;
+    btnCli.disabled = !unHost;
+  }, 500);
+
+
+  // 5. Refresco automático de lista de servidores
   setInterval(() => {
     loadActiveServers();
   }, 10000);
