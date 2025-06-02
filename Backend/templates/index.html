@@ -8,14 +8,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <style>
-    body { font-family: 'Poppins', sans-serif; }
-    #mapa-topologia {
-    height: 600px;
-    }
-  </style>
+  <link rel="stylesheet" href="../static/css/custom-styles.css">
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50 h-screen">
   <header class="fixed w-full bg-white/80 backdrop-blur border-b border-gray-200 shadow-md z-50 transition-all">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16">
       <a href="#dashboard" class="text-2xl font-bold text-blue-600 tracking-tight hover:text-blue-700 transition">NetFlowX</a>
@@ -61,12 +56,9 @@
   <section id="topology" class="mb-12 p-6 bg-white rounded-xl shadow-lg border border-gray-200">
     <h2 class="text-3xl font-bold text-gray-800 mb-6 text-center">Visualizador de Topología de Red</h2>
 
-    <!-- Mapa de Leaflet -->
     <div id="mapa-topologia"
-        class="w-full h-[500px] rounded-lg shadow-inner border border-gray-300">
-    </div>
+        class="w-full h-[600px] rounded-lg shadow-inner border border-gray-300"> </div>
 
-    <!-- Controles de ping y área de salida -->
     <div class="flex flex-col md:flex-row items-center justify-between mt-6 gap-4">
       <button id="btn-ping"
         class="bg-gradient-to-r from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-200 ease-in-out">
@@ -80,6 +72,18 @@
         </div>
       </div>
     </div>
+
+    <div id="acciones-host-seleccionado" class="flex gap-4 mt-4 hidden">
+      <button id="btn-iniciar-servidor"
+              class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+        Iniciar como Servidor
+      </button>
+      <button id="btn-iniciar-cliente"
+              class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+        Iniciar como Cliente
+      </button>
+    </div>
+
   </section>
 
   <section id="links" class="mb-12 p-6 bg-white rounded-lg shadow-md">
@@ -132,27 +136,21 @@
         <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-lg">
           <h3 class="text-lg font-semibold mb-4 text-blue-600">Editar Enlace</h3>
           <div class="space-y-4">
-            <!-- Hidden para IDs originales -->
             <input type="hidden" id="edit-link-origen-id">
             <input type="hidden" id="edit-link-destino-id">
 
-            <!-- NUEVO: select para escoger el switch de origen -->
             <div>
               <label for="edit-link-new-origen-id" class="block text-sm font-medium text-gray-700">Switch Origen</label>
               <select id="edit-link-new-origen-id" class="mt-1 block w-full p-2 border border-gray-300 rounded-md">
-                <!-- Opciones pobladas dinámicamente -->
-              </select>
+                </select>
             </div>
 
-            <!-- NUEVO: select para escoger el switch de destino -->
             <div>
               <label for="edit-link-new-destino-id" class="block text-sm font-medium text-gray-700">Switch Destino</label>
               <select id="edit-link-new-destino-id" class="mt-1 block w-full p-2 border border-gray-300 rounded-md">
-                <!-- Opciones pobladas dinámicamente -->
-              </select>
+                </select>
             </div>
 
-            <!-- Input de ancho de banda, igual que antes -->
             <div>
               <label for="edit-link-bw-input" class="block text-sm font-medium text-gray-700">Ancho de Banda (Mbps):</label>
               <input type="number" id="edit-link-bw-input" class="mt-1 block w-full p-2 border border-gray-300 rounded-md" min="1">
@@ -272,15 +270,13 @@
       <p class="text-gray-700">Aquí se mostrarán las estadísticas de tráfico y rendimiento.</p>
     </section>
 
-    <section id="help" class="p-6 bg-blue-100 rounded-lg shadow-md transition-all">
-        <p class="text-gray-700">Consulta la <a href="#" class="underline hover:text-blue-700">documentación completa</a> o utiliza nuestros recursos:</p>
+    <section id="help" class="p-6 bg-blue-100 rounded-lg shadow-md transition-all"> <p class="text-gray-700">Consulta la <a href="#" class="underline hover:text-blue-700">documentación completa</a> o utiliza nuestros recursos:</p>
         <ul class="list-disc list-inside text-gray-700">
           <li><a href="#" class="hover:text-blue-700">Guía rápida de inicio</a></li>
           <li><a href="#" class="hover:text-blue-700">Tutorial de integración API</a></li>
           <li><a href="#" class="hover:text-blue-700">FAQs</a></li>
         </ul>
-      </div>
-    </section>
+      </section>
 
   </main>
 
@@ -299,9 +295,39 @@
     </div>
   </div>
 
-  <script src="./static/js/index.js"></script>
-  <script src="./static/js/servers.js"></script>
-  <script src="./static/js/clients.js"></script>
-  <script src="./static/js/topology.js"></script>
+  <!-- Modal: Selector de Video y Peso -->
+  <div id="modal-selector-servidor-overlay"
+     class="hidden fixed inset-0 bg-black bg-opacity-40 items-center justify-center z-[9999]">
+      <div id="modal-selector-servidor"
+          class="bg-white rounded-lg p-6 w-full max-w-2xl shadow-xl scale-95 opacity-0 transform transition-all duration-300 relative">
+        
+        <h3 class="text-xl font-bold text-gray-800 mb-4">Seleccionar Video para el Servidor</h3>
+
+        <div id="modal-video-gallery" class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4"></div>
+
+        <div id="modal-server-weight-group" class="mb-4 hidden">
+          <label for="modal-server-weight" class="block text-sm font-medium text-gray-700">Peso del servidor:</label>
+          <input type="number" id="modal-server-weight" value="1" min="1"
+                class="mt-1 block w-full border rounded-md p-2 border-gray-300" />
+        </div>
+
+        <div class="flex justify-end gap-4 mt-6">
+          <button id="btn-modal-cancel-server"
+                  class="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition">Cancelar</button>
+          <button id="btn-modal-launch-server"
+                  class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition opacity-50 cursor-not-allowed"
+                  disabled>
+            Iniciar Servidor
+          </button>
+        </div>
+
+      </div>
+  </div>
+
+
+  <script src="../static/js/index.js"></script>
+  <script src="../static/js/servers.js"></script>
+  <script src="../static/js/clients.js"></script>
+  <script src="../static/js/topology.js"></script>
 </body>
 </html>

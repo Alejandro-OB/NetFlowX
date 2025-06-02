@@ -16,6 +16,7 @@ function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
   const contentElem = document.getElementById('message-modal-content');
   const confirmBtn  = document.getElementById('message-modal-confirm-btn');
   const cancelBtn   = document.getElementById('message-modal-cancel-btn');
+  //document.body.classList.add('overflow-hidden');
 
   if (!modal || !titleElem || !contentElem || !confirmBtn || !cancelBtn) {
     console.warn('showMessageModal: No se encontraron elementos del modal en el DOM.');

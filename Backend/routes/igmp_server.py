@@ -51,10 +51,18 @@ def process_igmp():
     elif msgtype == 22:  # IGMPv2 Membership Report (Join)
         group_ip = address
         group_membership.setdefault(group_ip, {}).setdefault(dpid, [])
+        # Clonar la lista actual para comparación
+        old_ports = list(group_membership[group_ip][dpid])
+
+        # Agregar el puerto si es nuevo
         if in_port not in group_membership[group_ip][dpid]:
             group_membership[group_ip][dpid].append(in_port)
             logger.info(f"✅ [JOIN-v2] {group_ip} -> switch {dpid}, port {in_port}")
+
+        # Comparar listas ordenadas: si hay diferencia, forzar reinstalación
+        if sorted(old_ports) != sorted(group_membership[group_ip][dpid]):
             install_flows.add(group_ip)
+
 
     elif msgtype == 23:  # IGMPv2 Leave
         group_ip = address

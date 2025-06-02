@@ -257,7 +257,7 @@ document.getElementById('requestStreamBtn').addEventListener('click', async () =
 
 async function updateActiveClientsDashboard() {
     const dashboardListDiv = document.getElementById('active-http-clients-dashboard-list');
-    dashboardListDiv.innerHTML = ''; // Limpiar contenido previo
+    dashboardListDiv.innerHTML = ''; 
 
     try {
         const response = await fetch(`${API_BASE_URL}/client/active_clients`);

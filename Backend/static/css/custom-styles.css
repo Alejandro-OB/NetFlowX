@@ -1,0 +1,36 @@
+/* Contenido para custom-styles.css */
+body {
+  font-family: 'Poppins', sans-serif;
+}
+
+#mapa-topologia {
+  height: 600px; /* Ajustado desde 500px a 600px como en el original */
+}
+
+/* Asegura que los elementos de Leaflet no tapen modales */
+.leaflet-container {
+  z-index: 1 !important;
+}
+
+/* Los modales deben tener prioridad */
+#message-modal{
+  z-index: 9999 !important;
+}
+
+#modal-selector-servidor-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+}
+
+#modal-selector-servidor-overlay.show {
+  display: flex;
+}
+
+html, body {
+  height: 100%;
+}

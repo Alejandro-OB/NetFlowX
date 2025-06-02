@@ -342,22 +342,8 @@ def calculate_path_endpoint():
 @dijkstra_bp.route('/calculate_multicast_tree', methods=['POST'])
 def calculate_multicast_tree():
     """
-    Endpoint que recibe JSON con:
-      {
-        "source_dpid": <dpid_entero>,
-        "member_dpids": [<dpid1>, <dpid2>, ...]
-      }
-    y devuelve el 'árbol multicast' en formato:
-      {
-        "tree": {
-          "<dpid_str>": [<puerto1>, <puerto2>, ...],
-          ...
-        }
-      }
-
-    Usa Dijkstra para calcular rutas desde source_dpid a cada member_dpid.
-    Extrae puertos intermedios del grafo `network_graph`.
-    Inyecta también el puerto de salida hacia los hosts finales.
+    Calcula el árbol multicast a partir de un switch fuente hacia múltiples switches destino.
+    Si algún enlace o puerto requerido no existe, se devuelve un error y NO se devuelve el árbol incompleto.
     """
     data = request.get_json(force=True)
     source_dpid = data.get('source_dpid')
@@ -366,7 +352,7 @@ def calculate_multicast_tree():
     if source_dpid is None or not isinstance(member_dpids, list) or not member_dpids:
         return jsonify({"error": "source_dpid o member_dpids faltantes o mal formateados"}), 400
 
-    load_topology()  # Asegurarnos de tener la topología más reciente
+    load_topology()
     tree = {}
 
     for dst_dpid in member_dpids:
@@ -375,7 +361,7 @@ def calculate_multicast_tree():
 
         path = calculate_dijkstra_path(source_dpid, dst_dpid)
         if not path:
-            continue
+            return jsonify({"error": f"No se encontró ruta hacia {dst_dpid}"}), 400
 
         for i in range(len(path) - 1):
             current_dpid = path[i][0]
@@ -383,20 +369,18 @@ def calculate_multicast_tree():
 
             enlace = network_graph.get(current_dpid, {}).get(next_dpid)
             if not enlace:
-                logger.warning(f"Enlace no encontrado: {current_dpid} → {next_dpid}")
-                continue
+                return jsonify({"error": f"Enlace no encontrado entre {current_dpid} y {next_dpid}"}), 400
 
             port_out = enlace.get('port_out')
             if not isinstance(port_out, int) or port_out <= 0:
-                logger.warning(f"Puerto de salida inválido: {current_dpid} → {next_dpid}")
-                continue
+                return jsonify({"error": f"Puerto inválido entre {current_dpid} y {next_dpid}"}), 400
 
             tree.setdefault(current_dpid, set()).add(port_out)
 
-    # Convertir a formato serializable
+    # Convertir a JSON serializable
     serialized_tree = {str(dpid): list(ports) for dpid, ports in tree.items()}
 
-    # Agregar puerto final hacia cada host conectado a member_dpid (hojas)
+    # Agregar salida final hacia cada host conectado a los switches destino (hojas)
     for leaf_dpid in member_dpids:
         leaf_str = str(leaf_dpid)
         if leaf_str in serialized_tree:
@@ -409,11 +393,12 @@ def calculate_multicast_tree():
                 break
 
         if not isinstance(port_cliente, int) or port_cliente <= 0:
-            serialized_tree.setdefault(leaf_str, [])
-        else:
-            serialized_tree[leaf_str] = [port_cliente]
+            return jsonify({"error": f"No se encontró puerto hacia cliente en switch {leaf_dpid}"}), 400
+
+        serialized_tree[leaf_str] = [port_cliente]
 
     return jsonify({"tree": serialized_tree}), 200
+
 
 
 
