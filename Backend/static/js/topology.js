@@ -1,7 +1,4 @@
 // --- topology.js ---
-
-
-
 let map;                        // Mapa Leaflet
 let markers    = {};            // { id_switch: L.marker }   (marcadores de switches)
 let hostMarkers = {};           // { mac: L.marker }         (marcadores de hosts)
