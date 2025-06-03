@@ -70,11 +70,17 @@ def process_igmp():
             if in_port in group_membership[group_ip][dpid]:
                 group_membership[group_ip][dpid].remove(in_port)
                 logger.info(f"❌ [LEAVE-v2] {group_ip} <- switch {dpid}, port {in_port}")
-                if not group_membership[group_ip][dpid]:
-                    del group_membership[group_ip][dpid]
-                if not group_membership[group_ip]:
-                    del group_membership[group_ip]
-                    remove_flows.add(group_ip)
+
+            # ✅ Solo eliminar dpid si su lista quedó vacía
+            if not group_membership[group_ip][dpid]:
+                del group_membership[group_ip][dpid]
+
+            # ✅ Solo verificar y eliminar el grupo si todavía existe
+            if group_ip in group_membership and not any(group_membership[group_ip].values()):
+                del group_membership[group_ip]
+                remove_flows.add(group_ip)
+
+
 
     return jsonify({
         "group_membership": group_membership,

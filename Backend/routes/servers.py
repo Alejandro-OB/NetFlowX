@@ -171,8 +171,9 @@ def remover_servidor_hosts_table():
         # Llamada al agente Mininet para detener FFmpeg del servidor
         response_agent = requests.post(
             f"{url_agent}/mininet/stop_ffmpeg_server",
-            json={"host": nombre}
+            json={"host": nombre, "ip_multicast": multicast_ip}
         )
+
         if response_agent.ok:
             agent_response = response_agent.json()
             

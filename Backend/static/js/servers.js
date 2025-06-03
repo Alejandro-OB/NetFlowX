@@ -4,7 +4,7 @@ async function loadActiveServers() {
   try {
     const response = await fetch(`${API_BASE_URL}/servers/active_servers`);
     const data = await response.json();
-
+    window.servidoresActivosData = data;
     window.servidoresActivos = data.map(server => server.host_name);
 
     const serversListDiv = document.getElementById('active-servers-list');
@@ -108,6 +108,10 @@ async function handleRemoveServer(event) {
     const hostName = event.target.dataset.hostName;
     const host = window.hostData?.find(h => h.name === hostName);
 
+    // 🔍 Obtener IP multicast correspondiente al host desde la lista activa
+    const serverData = window.servidoresActivosData?.find(s => s.host_name === hostName);
+    const ipMulticast = serverData?.ip_destino;
+
     showMessageModal(
         'Confirmar Eliminación',
         `¿Estás seguro de que quieres eliminar el servidor ${hostName}? Esto detendrá el streaming de video en ese host.`,
@@ -117,7 +121,10 @@ async function handleRemoveServer(event) {
                 const response = await fetch(`${API_BASE_URL}/servers/remove`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ host_name: hostName })
+                    body: JSON.stringify({
+                        host_name: hostName,
+                        ip_multicast: ipMulticast
+                    })
                 });
 
                 const data = await response.json();
@@ -126,8 +133,7 @@ async function handleRemoveServer(event) {
                     await loadActiveClientsFromDB();        // actualiza array + tabla
                     await loadMininetHosts();               // actualiza lista de clientes disponibles
                     await actualizarIconosDeHosts?.();  
-                    actualizarIconosDeHosts?.(); 
-                    deseleccionarHost?.(host);     // actualiza íconos de topología
+                    deseleccionarHost?.(host);              // actualiza íconos de topología
                     await updateActiveClientsTable();       // fuerza recarga visual en la tabla
                     await updateDashboard?.();              // actualiza resumen en dashboard
                     await loadActiveServers?.();            // actualiza la lista de servidores
@@ -144,6 +150,7 @@ async function handleRemoveServer(event) {
         }
     );
 }
+
 
 
 // --- servers.js ---

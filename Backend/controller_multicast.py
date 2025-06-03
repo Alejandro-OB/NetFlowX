@@ -19,9 +19,20 @@ from ryu.lib.packet import icmp
 from ryu.lib.packet import igmp # Importar IGMP
 from ryu.ofproto import inet 
 from ryu.controller.handler import DEAD_DISPATCHER
+
 import psycopg2.extras # Para obtener resultados de la DB como diccionarios
 import requests
 
+import logging
+from logging.handlers import RotatingFileHandler
+log_filename = 'ryu_output.log'
+handler = RotatingFileHandler(log_filename, maxBytes=10*1024*1024, backupCount=5)  # 10 MB, 5 backups
+formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+handler.setFormatter(formatter)
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)  # Puedes cambiar a INFO si quieres menos verbosidad
+root_logger.addHandler(handler)
 class Controller(app_manager.RyuApp):
     # Define las versiones de OpenFlow soportadas
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
