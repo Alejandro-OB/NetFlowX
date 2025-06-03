@@ -58,7 +58,7 @@ async function lanzarServidor({ hostName, videoPath, peso = 1 }) {
       deseleccionarHost(hostName);
       loadActiveServers?.();
       updateDashboard?.();
-      actualizarIconosDeHosts?.();
+      await actualizarIconosDeHosts?.();
       deseleccionarHost(hostName);
       loadTopology?.();
       cerrarModal?.(); 
@@ -106,30 +106,44 @@ document.getElementById('add-server-btn').addEventListener('click', async () => 
 
 async function handleRemoveServer(event) {
     const hostName = event.target.dataset.hostName;
-    showMessageModal('Confirmar Eliminación', `¿Estás seguro de que quieres eliminar el servidor ${hostName}? Esto detendrá el streaming de video en ese host.`, true, async () => {
-        try {
-            const response = await fetch(`${API_BASE_URL}/servers/remove`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host_name: hostName })
-            });
-            const data = await response.json();
-            if (response.ok) {
-                showMessageModal('Éxito', data.message);
-                loadActiveServers(); // Refrescar lista de servidores
-                updateDashboard();
-                updateActiveClientsTable();
-                actualizarIconosDeHosts?.();
-                loadTopology?.(); // Refrescar dashboard (función de index.js)
-            } else {
-                showMessageModal('Error', `Error al eliminar servidor: ${data.error}`);
+
+    showMessageModal(
+        'Confirmar Eliminación',
+        `¿Estás seguro de que quieres eliminar el servidor ${hostName}? Esto detendrá el streaming de video en ese host.`,
+        true,
+        async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/servers/remove`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ host_name: hostName })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    await loadActiveClientsFromDB();        // actualiza array + tabla
+                    await loadMininetHosts();               // actualiza lista de clientes disponibles
+                    await actualizarIconosDeHosts?.();  
+                    actualizarIconosDeHosts?.(); 
+                    deseleccionarHost?.(host);     // actualiza íconos de topología
+                    await updateActiveClientsTable();       // fuerza recarga visual en la tabla
+                    await updateDashboard?.();              // actualiza resumen en dashboard
+                    await loadActiveServers?.();            // actualiza la lista de servidores
+                    await loadTopology?.();                 // recarga visual de topología
+
+                    showMessageModal('Éxito', data.message || 'Servidor eliminado.');
+                } else {
+                    showMessageModal('Error', `Error al eliminar servidor: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('Error eliminando servidor:', error);
+                showMessageModal('Error', 'Error de conexión al eliminar el servidor.');
             }
-        } catch (error) {
-            console.error('Error eliminando servidor:', error);
-            showMessageModal('Error', 'Error de conexión al eliminar el servidor.');
         }
-    });
+    );
 }
+
 
 // --- servers.js ---
 
@@ -250,12 +264,15 @@ document.getElementById('btn-iniciar-servidor')?.addEventListener('click', async
         body: JSON.stringify({ host_name: host.name })
       });
       const data = await res.json();
-      showMessageModal('Servidor detenido', data.message || 'Servidor eliminado.');
-      loadActiveServers();
-      updateDashboard?.();
-      actualizarIconosDeHosts?.();
-      deseleccionarHost(host.name);
-      loadTopology?.();
+        await loadActiveClientsFromDB();        // actualiza array + tabla
+        await loadMininetHosts();               // actualiza lista de clientes disponibles
+        await actualizarIconosDeHosts?.();  
+        actualizarIconosDeHosts?.(); 
+        deseleccionarHost?.(host);     // actualiza íconos de topología
+        await updateActiveClientsTable();       // fuerza recarga visual en la tabla
+        await updateDashboard?.();              // actualiza resumen en dashboard
+        await loadActiveServers?.();            // actualiza la lista de servidores
+        await loadTopology?.(); 
     } catch (e) {
       console.error(e);
       showMessageModal('Error', 'No se pudo detener el servidor.');
@@ -305,7 +322,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await stopFFmpegClient(host.name);
         loadActiveClientsFromDB?.();
         updateDashboard?.();
-        actualizarIconosDeHosts?.();
+        await actualizarIconosDeHosts?.();
         //loadTopology?.();
       } else {
         showMessageModal('Error', 'No se encontró la función stopFFmpegClient');
@@ -410,6 +427,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 5. Refresco automático de lista de servidores
   setInterval(() => {
-    loadActiveServers();
+    //loadActiveServers();
   }, 10000);
 });

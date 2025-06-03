@@ -69,15 +69,15 @@ async function loadMininetHosts() {
 
 async function updateActiveClientsTable() {
     const tableBody = document.getElementById('active-ffplay-clients-list');
-    tableBody.innerHTML = ''; // Limpiar tabla existente
+    if (!tableBody) return;
+    tableBody.innerHTML = ''; // ✅ LIMPIAR TABLA
 
     try {
-        const response = await fetch(`${API_BASE_URL}/client/active_clients`);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        const response = await fetch(`${API_BASE_URL}/client/active_clients?nocache=${Date.now()}`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
         const data = await response.json();
-        const activeClients = data.active_clients || [];
+        const activeClients = Array.isArray(data.active_clients) ? data.active_clients : [];
 
         if (activeClients.length === 0) {
             tableBody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">No hay clientes activos.</td></tr>';
@@ -101,12 +101,11 @@ async function updateActiveClientsTable() {
             tableBody.appendChild(tr);
         });
 
-        // Listeners para los botones de "Detener"
+        // ✅ Agregar listeners de detener
         document.querySelectorAll('.stop-ffplay-client-btn').forEach(button => {
             button.addEventListener('click', async (event) => {
                 const host = event.target.dataset.host;
-                // Opcionalmente podrías pedir confirmación
-                await stopFFmpegClient(host, null); // Debes modificar stopFFmpegClient para aceptar solo el host
+                await stopFFmpegClient(host, null);
             });
         });
 
@@ -130,7 +129,11 @@ async function startFFmpegClient(host, streamInfo) {
         });
         const data = await response.json();
         if (response.ok && data.success) {
-            showMessageModal('Éxito', `Cliente FFplay iniciado en ${host} para ${multicastIp}:${multicastPort}`);
+            showMessageModal(
+            'Cliente Iniciado',
+            `El host <strong>${host}</strong> ha sido asignado correctamente al servidor <strong>${serverName}</strong>.<br>Dirección: <code>${multicastIp}:${multicastPort}</code>`
+            );
+
 
 
             await updateHostClientStatus(host, true);
@@ -143,6 +146,7 @@ async function startFFmpegClient(host, streamInfo) {
 
             await addActiveClientToDB(host, multicastIp, multicastPort, 'stream_multicast', serverName);
             loadActiveClientsFromDB();
+            updateDashboard();
             loadMininetHosts();
             actualizarIconosDeHosts?.();
             deseleccionarHost?.(host);
@@ -178,6 +182,7 @@ async function stopFFmpegClient(host, ffplayPid = null) {
                 await updateHostClientStatus(host, false);
                 await removeActiveClientFromDB(host);
                 await loadActiveClientsFromDB();
+                updateDashboard();
                 loadMininetHosts();
                 actualizarIconosDeHosts?.(); 
                 deseleccionarHost?.(host); 
@@ -303,25 +308,25 @@ async function updateHostClientStatus(hostName, isClient) {
 
 async function loadActiveClientsFromDB() {
     try {
-        const response = await fetch(`${API_BASE_URL}/client/active_clients`);
+        const response = await fetch(`${API_BASE_URL}/client/active_clients?nocache=${Date.now()}`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        const data = await response.json();
-        if (data.active_clients) {
-            setActiveClients(data.active_clients);
-        } else {
-            setActiveClients([]);
-        }
 
-        updateActiveClientsTable();
-        updateDashboard();
-        actualizarIconosDeHosts?.(); 
+        const data = await response.json();
+        const clients = Array.isArray(data.active_clients) ? data.active_clients : [];
+        setActiveClients(clients);
+
+        console.log('Clientes activos actualizados:', clients.map(c => c.host));
+
+        await updateActiveClientsTable();     // ✅ redibuja tabla
+        await actualizarIconosDeHosts?.();    // ✅ cambia íconos
     } catch (error) {
         console.error('Error cargando clientes activos desde la DB:', error);
         showMessageModal('Error', 'No se pudieron cargar los clientes activos: ' + error.message);
     }
 }
+
 
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {

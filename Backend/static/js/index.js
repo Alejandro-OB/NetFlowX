@@ -26,7 +26,7 @@ function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
   }
 
   titleElem.textContent   = title;
-  contentElem.textContent = message;
+  contentElem.innerHTML = message;
   confirmBtn.onclick = null;
   cancelBtn.onclick  = null;
 

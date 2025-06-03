@@ -59,51 +59,40 @@ function getSwitchIcon() {
   });
 }
 
-function actualizarIconosDeHosts() {
+async function actualizarIconosDeHosts() {
   if (!window.hostMarkers) return;
+
+  const clientesActivos = await window.fetchClientesActivosDesdeDB();
+  const nombresClientes = clientesActivos.map(c => c.host);
 
   Object.entries(window.hostMarkers).forEach(([mac, marker]) => {
     const host = window.hostData?.find(h => h.mac === mac);
     if (!host) return;
 
     const seleccionado = selectedHosts.some(h => h.mac === mac);
-    marker.setIcon(getHostIcon(host, seleccionado));
+    const esServidor = window.servidoresActivos?.includes(host.nombre);
+    const esCliente = nombresClientes.includes(host.nombre);
+
+    let iconUrl = 'static/icons/monitor.png';
+    if (seleccionado) {
+      iconUrl = 'static/icons/monitor_selected.png';
+    }
+    if (esServidor) {
+      iconUrl = 'static/icons/server_host.png';
+    } else if (esCliente) {
+      iconUrl = 'static/icons/client_host.png';
+    }
+
+    marker.setIcon(L.icon({
+      iconUrl,
+      iconSize: [13, 13],
+      iconAnchor: [6.5, 6.5],
+      popupAnchor: [0, -16]
+    }));
   });
 }
 
 
-function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
-  const modal = document.getElementById('message-modal');
-  const titleElem = document.getElementById('message-modal-title');
-  const contentElem = document.getElementById('message-modal-content');
-  const confirmBtn = document.getElementById('message-modal-confirm-btn');
-  const cancelBtn = document.getElementById('message-modal-cancel-btn');
-
-  if (!modal || !titleElem || !contentElem || !confirmBtn || !cancelBtn) {
-    alert(`${title}\n\n${message}`);
-    if (isConfirm && onConfirm) onConfirm();
-    return;
-  }
-
-  titleElem.textContent = title;
-  contentElem.textContent = message;
-  confirmBtn.onclick = null;
-  cancelBtn.onclick = null;
-
-  confirmBtn.onclick = () => {
-    modal.classList.add('hidden');
-    if (isConfirm && onConfirm) onConfirm();
-  };
-
-  if (isConfirm) {
-    cancelBtn.classList.remove('hidden');
-    cancelBtn.onclick = () => modal.classList.add('hidden');
-  } else {
-    cancelBtn.classList.add('hidden');
-  }
-
-  modal.classList.remove('hidden');
-}
 
 async function loadTopology() {
   try {
