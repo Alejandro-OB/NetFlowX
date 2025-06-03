@@ -4,36 +4,40 @@ async function loadActiveServers() {
   try {
     const response = await fetch(`${API_BASE_URL}/servers/active_servers`);
     const data = await response.json();
+
+    window.servidoresActivos = data.map(server => server.host_name);
+
     const serversListDiv = document.getElementById('active-servers-list');
     serversListDiv.innerHTML = '';
     if (data.length > 0) {
-        data.forEach(server => {
-            const serverDiv = document.createElement('div');
-            serverDiv.className = 'p-2 border-b border-gray-200 flex justify-between items-center';
-            serverDiv.innerHTML = `
-                <div>
-                    <p class="font-semibold">${server.host_name}</p>
-                    <p>Video: ${server.video_path}</p>
-                    <p>IP Multicast: ${server.ip_destino}:${server.puerto}</p>
-                    <p>Peso: ${server.server_weight}</p>
-                    <p class="text-xs text-gray-500">Estado: ${server.status} (Última actualización: ${new Date(server.last_updated).toLocaleString()})</p>
-                </div>
-                <button data-host-name="${server.host_name}" class="remove-server-btn px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors">Eliminar</button>
-            `;
-            serversListDiv.appendChild(serverDiv);
-        });
-        // Adjuntar listeners de eventos a los nuevos botones de eliminar
-        document.querySelectorAll('.remove-server-btn').forEach(button => {
-            button.addEventListener('click', handleRemoveServer);
-        });
+      data.forEach(server => {
+        const serverDiv = document.createElement('div');
+        serverDiv.className = 'p-2 border-b border-gray-200 flex justify-between items-center';
+        serverDiv.innerHTML = `
+            <div>
+                <p class="font-semibold">${server.host_name}</p>
+                <p>Video: ${server.video_path}</p>
+                <p>IP Multicast: ${server.ip_destino}:${server.puerto}</p>
+                <p>Peso: ${server.server_weight}</p>
+                <p class="text-xs text-gray-500">Estado: ${server.status} (Última actualización: ${new Date(server.last_updated).toLocaleString()})</p>
+            </div>
+            <button data-host-name="${server.host_name}" class="remove-server-btn px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors">Eliminar</button>
+        `;
+        serversListDiv.appendChild(serverDiv);
+      });
+
+      document.querySelectorAll('.remove-server-btn').forEach(button => {
+        button.addEventListener('click', handleRemoveServer);
+      });
     } else {
-        serversListDiv.textContent = 'No hay servidores de video activos.';
+      serversListDiv.textContent = 'No hay servidores de video activos.';
     }
   } catch (error) {
     console.error('Error cargando servidores activos:', error);
     showMessageModal('Error', 'No se pudo cargar la lista de servidores activos.');
   }
 }
+
 
 async function lanzarServidor({ hostName, videoPath, peso = 1 }) {
   try {
@@ -51,11 +55,16 @@ async function lanzarServidor({ hostName, videoPath, peso = 1 }) {
 
     if (response.ok) {
       showMessageModal('Éxito', `Servidor ${hostName} activado. IP Multicast: ${data.multicast_ip}:${data.multicast_port}`);
+      deseleccionarHost(hostName);
       loadActiveServers?.();
       updateDashboard?.();
-      cerrarModal?.(); // ✅ CIERRA el modal si existe
+      actualizarIconosDeHosts?.();
+      deseleccionarHost(hostName);
+      loadTopology?.();
+      cerrarModal?.(); 
       return { success: true, message: data.message };
     } else {
+      cerrarModal?.(); 
       showMessageModal('Error', `Error al activar servidor: ${data.error}`);
       return { success: false, message: data.error };
     }
@@ -108,7 +117,10 @@ async function handleRemoveServer(event) {
             if (response.ok) {
                 showMessageModal('Éxito', data.message);
                 loadActiveServers(); // Refrescar lista de servidores
-                updateDashboard(); // Refrescar dashboard (función de index.js)
+                updateDashboard();
+                updateActiveClientsTable();
+                actualizarIconosDeHosts?.();
+                loadTopology?.(); // Refrescar dashboard (función de index.js)
             } else {
                 showMessageModal('Error', `Error al eliminar servidor: ${data.error}`);
             }
@@ -223,13 +235,36 @@ async function iniciarServidorDesdeModal() {
 }
 
 
-document.getElementById('btn-iniciar-servidor')?.addEventListener('click', () => {
-  if (selectedHosts.length !== 1) {
-    showMessageModal('Error', 'Selecciona un host desde la topología.');
-    return;
+document.getElementById('btn-iniciar-servidor')?.addEventListener('click', async () => {
+  if (!selectedHosts || selectedHosts.length !== 1) return;
+
+  const host = selectedHosts[0];
+  const esServidor = window.servidoresActivos?.includes(host.name);
+
+  if (esServidor) {
+    // Detener servidor
+    try {
+      const res = await fetch(`${API_BASE_URL}/servers/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host_name: host.name })
+      });
+      const data = await res.json();
+      showMessageModal('Servidor detenido', data.message || 'Servidor eliminado.');
+      loadActiveServers();
+      updateDashboard?.();
+      actualizarIconosDeHosts?.();
+      deseleccionarHost(host.name);
+      loadTopology?.();
+    } catch (e) {
+      console.error(e);
+      showMessageModal('Error', 'No se pudo detener el servidor.');
+    }
+  } else {
+    abrirModalSeleccionVideo(); // Iniciar
   }
-  abrirModalSeleccionVideo();
 });
+
 
 document.getElementById('btn-modal-launch-server')?.addEventListener('click', iniciarServidorDesdeModal);
 document.getElementById('btn-modal-cancel-server')?.addEventListener('click', cerrarModal);
@@ -249,48 +284,56 @@ document.addEventListener('DOMContentLoaded', () => {
   loadActiveServers();
   verificarAlgoritmoBalanceo();
 
-  // 2. Listeners de botones
-  document.getElementById('btn-iniciar-servidor')?.addEventListener('click', () => {
-    abrirModalSeleccionVideo();
-  });
+  if (typeof loadActiveClientsFromDB === 'function') {
+    loadActiveClientsFromDB();
+    //setInterval(loadActiveClientsFromDB, 10000);
+  }
 
   document.getElementById('btn-modal-launch-server')?.addEventListener('click', async () => {
     await iniciarServidorDesdeModal();
   });
 
   document.getElementById('btn-iniciar-cliente')?.addEventListener('click', async () => {
-    if (!selectedHosts || selectedHosts.length !== 1) {
-      showMessageModal('Error', 'Selecciona un único host desde la topología.');
-      return;
-    }
+    if (!selectedHosts || selectedHosts.length !== 1) return;
 
     const host = selectedHosts[0];
+    const esCliente = window.activeFFplayClients?.some(c => c.host === host.name);
 
-    if (window.activeFFplayClients?.some(client => client.host === host.name)) {
-      showMessageModal('Advertencia', `El host ${host.name} ya tiene un cliente FFplay activo.`);
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/client/get_multicast_stream_info`);
-      const data = await response.json();
-
-      if (response.ok && data.host_name && data.multicast_ip && data.multicast_port) {
-        const streamInfo = {
-          serverName: data.host_name,
-          multicastIp: data.multicast_ip,
-          multicastPort: data.multicast_port
-        };
-        await startFFmpegClient(host.name, streamInfo);
+    if (esCliente) {
+      // ✅ Llamar a la función que detiene realmente al cliente
+      if (typeof stopFFmpegClient === 'function') {
+        await stopFFmpegClient(host.name);
+        loadActiveClientsFromDB?.();
+        updateDashboard?.();
+        actualizarIconosDeHosts?.();
+        //loadTopology?.();
       } else {
-        showMessageModal("Error", "No se pudo obtener información completa del servidor.");
-        console.error("❌ Datos incompletos del backend:", data);
+        showMessageModal('Error', 'No se encontró la función stopFFmpegClient');
       }
-    } catch (error) {
-      console.error('Error solicitando información del stream:', error);
-      showMessageModal('Error', 'Error de conexión al solicitar información del stream.');
+    } else {
+      // Iniciar cliente como antes
+      try {
+        const response = await fetch(`${API_BASE_URL}/client/get_multicast_stream_info`);
+        const data = await response.json();
+
+        if (response.ok && data.host_name && data.multicast_ip && data.multicast_port) {
+          const streamInfo = {
+            serverName: data.host_name,
+            multicastIp: data.multicast_ip,
+            multicastPort: data.multicast_port
+          };
+          await startFFmpegClient(host.name, streamInfo);
+          deseleccionarHost(host.name);
+        } else {
+          showMessageModal("Error", "No se pudo obtener información completa del servidor.");
+        }
+      } catch (error) {
+        console.error('Error solicitando información del stream:', error);
+        showMessageModal('Error', 'Error de conexión al solicitar información del stream.');
+      }
     }
   });
+
 
   // 3. Cierre de modal con Escape o clic fuera
   document.addEventListener('keydown', (e) => {
@@ -307,17 +350,62 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnPing = document.getElementById('btn-ping');
     const btnSrv = document.getElementById('btn-iniciar-servidor');
     const btnCli = document.getElementById('btn-iniciar-cliente');
-
     if (!btnPing || !btnSrv || !btnCli || typeof selectedHosts === 'undefined') return;
 
-    // Habilitar solo si hay 2 hosts seleccionados
-    btnPing.disabled = selectedHosts.length !== 2;
+    const selectedCount = selectedHosts.length;
 
-    // Habilitar servidor/cliente solo si hay 1 host seleccionado
-    const unHost = selectedHosts.length === 1;
-    btnSrv.disabled = !unHost;
-    btnCli.disabled = !unHost;
+    // Estilos reutilizables
+    const estiloBase = 'text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-200 ease-in-out';
+    const estiloAzul = 'bg-gradient-to-r from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900';
+    const estiloRojo = 'bg-red-600 hover:bg-red-700';
+    const estiloDeshabilitado = 'opacity-50 cursor-not-allowed';
+
+    btnPing.disabled = selectedCount !== 2;
+
+    if (selectedCount === 1) {
+      const host = selectedHosts[0];
+      const esServidor = window.servidoresActivos?.includes(host.name);
+      const esCliente = window.activeFFplayClients?.some(c => c.host === host.name);
+
+      // --- BOTÓN SERVIDOR ---
+      if (esCliente) {
+        btnSrv.disabled = true;
+        btnSrv.textContent = 'Iniciar como Servidor';
+        btnSrv.className = `${estiloAzul} ${estiloBase} ${estiloDeshabilitado}`;
+      } else {
+        btnSrv.disabled = false;
+        btnSrv.textContent = esServidor ? 'Detener Servidor' : 'Iniciar como Servidor';
+        btnSrv.className = esServidor
+          ? `${estiloRojo} ${estiloBase}`
+          : `${estiloAzul} ${estiloBase}`;
+      }
+
+      // --- BOTÓN CLIENTE ---
+      if (esServidor) {
+        btnCli.disabled = true;
+        btnCli.textContent = 'Iniciar como Cliente';
+        btnCli.className = `${estiloAzul} ${estiloBase} ${estiloDeshabilitado}`;
+      } else {
+        btnCli.disabled = false;
+        btnCli.textContent = esCliente ? 'Detener Cliente' : 'Iniciar como Cliente';
+        btnCli.className = esCliente
+          ? `${estiloRojo} ${estiloBase}`
+          : `${estiloAzul} ${estiloBase}`;
+      }
+
+    } else {
+      // 🔒 Si no hay host seleccionado, desactivar ambos botones
+      btnSrv.disabled = true;
+      btnSrv.textContent = 'Iniciar como Servidor';
+      btnSrv.className = `${estiloAzul} ${estiloBase} ${estiloDeshabilitado}`;
+
+      btnCli.disabled = true;
+      btnCli.textContent = 'Iniciar como Cliente';
+      btnCli.className = `${estiloAzul} ${estiloBase} ${estiloDeshabilitado}`;
+    }
   }, 500);
+
+
 
 
   // 5. Refresco automático de lista de servidores

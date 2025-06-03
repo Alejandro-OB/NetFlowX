@@ -1,11 +1,5 @@
 // --- topology.js ---
-// Gestión completa de topología (switches, hosts en mapa),
-// ping entre hosts (SSE) y trazado de ruta (Dijkstra),
-// **sin generar ningún checkbox en HTML**.
 
-// ==============================
-//  Constantes y Variables Globales
-// ==============================
 
 
 let map;                        // Mapa Leaflet
@@ -22,25 +16,63 @@ function colorPorAnchoBanda(ancho_banda) {
   else return '#FF0000';
 }
 
-function hostIcon(seleccionado = false) {
+function getHostIcon(host, seleccionado = false) {
+  const esServidor = window.servidoresActivos?.includes(host.nombre);
+  const esCliente = window.activeFFplayClients?.some(c => c.host === host.nombre);
+
+  let iconUrl = 'static/icons/monitor.png';
+  if (seleccionado) {
+    iconUrl = 'static/icons/monitor_selected.png';
+  }
+  if (esServidor) {
+    iconUrl = 'static/icons/server_host.png';
+  } else if (esCliente) {
+    iconUrl = 'static/icons/client_host.png';
+  }
+
   return L.icon({
-    iconUrl: seleccionado ? '/icons/monitor_selected.png' : '/icons/monitor.png',
+    iconUrl,
     iconSize: [13, 13],
     iconAnchor: [6.5, 6.5],
     popupAnchor: [0, -16]
   });
 }
 
+function deseleccionarHost(hostName) {
+  if (!window.selectedHosts || !window.hostMarkers) return;
+
+  const index = selectedHosts.findIndex(h => h.name === hostName);
+  if (index !== -1) {
+    const [removed] = selectedHosts.splice(index, 1);
+    const marker = hostMarkers[removed.mac];
+    if (marker) {
+      marker.setIcon(getHostIcon(removed, false));
+    }
+  }
+}
+
+window.deseleccionarHost = deseleccionarHost;
 
 function getSwitchIcon() {
   return L.icon({
-    iconUrl: '/icons/switch.png',
+    iconUrl: 'static/icons/switch.png',
     iconSize: [18, 28],
     iconAnchor: [14, 14],
     popupAnchor: [0, -16]
   });
 }
 
+function actualizarIconosDeHosts() {
+  if (!window.hostMarkers) return;
+
+  Object.entries(window.hostMarkers).forEach(([mac, marker]) => {
+    const host = window.hostData?.find(h => h.mac === mac);
+    if (!host) return;
+
+    const seleccionado = selectedHosts.some(h => h.mac === mac);
+    marker.setIcon(getHostIcon(host, seleccionado));
+  });
+}
 
 
 function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
@@ -143,6 +175,7 @@ async function loadTopology() {
       if (!hostsPorSwitch[idSw]) hostsPorSwitch[idSw] = [];
       hostsPorSwitch[idSw].push(host);
     });
+    window.hostData = data.hosts;
 
     function getOffsetPosition(baseLat, baseLon, index, total) {
       const spacing = 1.4; // distancia horizontal entre hosts
@@ -157,7 +190,7 @@ async function loadTopology() {
       if (!sw) return;
       hosts.forEach((host, i) => {
         const [lat, lon] = getOffsetPosition(sw.latitud, sw.longitud, i, hosts.length);
-        const marker = L.marker([lat, lon], { icon: hostIcon(false) })
+        const marker = L.marker([lat, lon], { icon: getHostIcon(host, false) })
           .addTo(map)
           .bindPopup(`<b>${host.nombre}</b><br>IP: ${host.ip}<br>MAC: ${host.mac}<br>Switch: ${sw.nombre}`)
           .bindTooltip(`${host.nombre} (${host.ip})`, { direction: 'top' });
@@ -170,7 +203,7 @@ async function loadTopology() {
 
           if (idx !== -1) {
             selectedHosts.splice(idx, 1);
-            marker.setIcon(hostIcon(false));
+            marker.setIcon(getHostIcon(host, false));
           } else {
             if (selectedHosts.length === 2) {
               const removed = selectedHosts.pop();
@@ -185,7 +218,7 @@ async function loadTopology() {
               name: host.nombre,
               id_switch: sw.id_switch
             });
-            marker.setIcon(hostIcon(true));
+            marker.setIcon(getHostIcon(host, true));
           }
 
           togglePingButton();

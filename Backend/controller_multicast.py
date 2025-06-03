@@ -482,10 +482,7 @@ class Controller(app_manager.RyuApp):
         if not member_switches:
             self.logger.warning(f"No hay miembros para el grupo multicast {multicast_group_addr}. No hay flujos para instalar.")
             self.logger.debug(f"DEBUG: Saliendo de _install_multicast_flows (sin miembros).")
-            # Considerar si se deben eliminar flujos existentes si los miembros desaparecen.
-            # La función _remove_multicast_flows debería encargarse de esto si no hay miembros.
-            # Aquí, si no hay miembros, no hay nada que instalar.
-            # Limpiar flujos si el árbol anterior existía y ahora no hay miembros.
+
             if self._last_installed_tree.get(multicast_group_addr):
                  self.logger.info(f"No hay miembros para {multicast_group_addr}, pero había un árbol anterior. Limpiando flujos.")
                  self._clear_flows_for_group(multicast_group_addr) # Necesitarás una función helper o mover lógica de _remove_multicast_flows
@@ -646,7 +643,7 @@ class Controller(app_manager.RyuApp):
 
             # Usar timeouts razonables
             self.add_flow(datapath, priority=200, match=match, actions=actions,
-                          idle_timeout=300, hard_timeout=600) # Timeouts en segundos
+                          idle_timeout=300, hard_timeout=0) # Timeouts en segundos
 
             current_dpids_with_flow_for_group.add(dpid)
             self.logger.info(f"[MULTICAST] Flujo instalado/actualizado en {dpid} para {multicast_group_addr} "

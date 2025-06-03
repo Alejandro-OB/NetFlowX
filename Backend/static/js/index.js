@@ -83,13 +83,42 @@ async function updateDashboard() {
       }
     }
 
-    // 3) Actualizar estado del controlador (conexión con switches)
+    // 3) Actualizar estado del controlador
     await updateControllerStatus();
+
+    // 4) Obtener y mostrar clientes activos en el dashboard
+    const dashboardListDiv = document.getElementById('active-http-clients-dashboard-list');
+    dashboardListDiv.innerHTML = ''; 
+
+    const cliRes = await fetch(`${API_BASE_URL}/client/active_clients`);
+    if (!cliRes.ok) {
+      throw new Error(`HTTP error! status: ${cliRes.status}`);
+    }
+
+    const cliData = await cliRes.json();
+    const activeClients = cliData.active_clients || [];
+
+    if (activeClients.length === 0) {
+      dashboardListDiv.textContent = 'No hay clientes activos.';
+    } else {
+      const ul = document.createElement('ul');
+      ul.className = 'list-disc list-inside';
+      activeClients.forEach(client => {
+        const li = document.createElement('li');
+        li.textContent = `Cliente: ${client.host} - Servidor: ${client.server_display_name || client.server_ip}`;
+        ul.appendChild(li);
+      });
+      dashboardListDiv.appendChild(ul);
+    }
+
   } catch (err) {
     console.error('Error updateDashboard():', err);
     showMessageModal('Error', `No se pudo actualizar el dashboard: ${err.message}`);
+    const fallback = document.getElementById('active-http-clients-dashboard-list');
+    if (fallback) fallback.textContent = 'Error al cargar clientes activos.';
   }
 }
+
 
 async function updateControllerStatus() {
   const statusElem = document.getElementById('controller-status');

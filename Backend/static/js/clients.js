@@ -1,5 +1,10 @@
 // Array global para mantener el estado de los clientes FFplay activos
-let activeFFplayClients = [];
+window.activeFFplayClients = [];
+
+function setActiveClients(clients) {
+  window.activeFFplayClients = [...clients]; // ✅ Reemplaza completamente el array
+}
+
 
 // --- Funciones de Clientes Multicast ---
 async function loadMininetHosts() {
@@ -61,9 +66,7 @@ async function loadMininetHosts() {
     }
 }
 
-/**
- * Renderiza o actualiza la tabla de clientes FFplay activos.
- */
+
 async function updateActiveClientsTable() {
     const tableBody = document.getElementById('active-ffplay-clients-list');
     tableBody.innerHTML = ''; // Limpiar tabla existente
@@ -113,13 +116,6 @@ async function updateActiveClientsTable() {
     }
 }
 
-
-/**
- * Inicia un cliente FFplay en un host de Mininet.
- * @param {string} host - Nombre del host cliente.
- * @param {string} multicastIp - IP Multicast del stream.
- * @param {number} multicastPort - Puerto Multicast del stream.
- */
 async function startFFmpegClient(host, streamInfo) {
     const { multicastIp, multicastPort, serverName } = streamInfo;
     try {
@@ -139,14 +135,6 @@ async function startFFmpegClient(host, streamInfo) {
 
             await updateHostClientStatus(host, true);
 
-            console.log('Valores a enviar a la BD:', {
-                host,
-                multicastIp,
-                multicastPort,
-                videoFile: 'stream_multicast',
-                serverName
-            });
-
             if (!serverName || !multicastIp || !multicastPort) {
                 console.error("❌ Datos incompletos del servidor:", streamInfo);
                 showMessageModal("Error", "La información del servidor asignado está incompleta.");
@@ -155,9 +143,10 @@ async function startFFmpegClient(host, streamInfo) {
 
             await addActiveClientToDB(host, multicastIp, multicastPort, 'stream_multicast', serverName);
             loadActiveClientsFromDB();
-            
-            //updateActiveClientsTable();
             loadMininetHosts();
+            actualizarIconosDeHosts?.();
+            deseleccionarHost?.(host);
+            loadTopology?.();
         } else {
             showMessageModal('Error', `Error al iniciar FFplay: ${data.error || 'Error desconocido'}`);
         }
@@ -169,11 +158,6 @@ async function startFFmpegClient(host, streamInfo) {
 
 
 
-/**
- * Detiene un cliente FFplay específico en un host de Mininet.
- * @param {string} host - Nombre del host cliente.
- * @param {string} ffplayPid - PID del proceso FFplay a detener.
- */
 async function stopFFmpegClient(host, ffplayPid = null) {
     const confirmMessage = `¿Deseas detener el cliente FFplay en ${host}${ffplayPid ? ` (PID: ${ffplayPid})` : ''}?`;
     showMessageModal('Confirmar Detención', confirmMessage, true, async () => {
@@ -193,8 +177,11 @@ async function stopFFmpegClient(host, ffplayPid = null) {
                 showMessageModal('Éxito', `FFplay detenido en ${host}.`);
                 await updateHostClientStatus(host, false);
                 await removeActiveClientFromDB(host);
-                updateActiveClientsTable();
+                await loadActiveClientsFromDB();
                 loadMininetHosts();
+                actualizarIconosDeHosts?.(); 
+                deseleccionarHost?.(host); 
+                loadTopology?.();
             } else {
                 showMessageModal('Error', `Error al detener FFplay: ${data.error || 'Error desconocido'}`);
             }
@@ -253,44 +240,6 @@ document.getElementById('requestStreamBtn').addEventListener('click', async () =
         streamInfoParagraph.className = 'mt-2 text-sm text-red-600';
     }
 });
-
-
-async function updateActiveClientsDashboard() {
-    const dashboardListDiv = document.getElementById('active-http-clients-dashboard-list');
-    dashboardListDiv.innerHTML = ''; 
-
-    try {
-        const response = await fetch(`${API_BASE_URL}/client/active_clients`);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const activeClients = data.active_clients || [];
-
-        if (activeClients.length === 0) {
-            dashboardListDiv.textContent = 'No hay clientes activos.';
-            return;
-        }
-
-        const ul = document.createElement('ul');
-        ul.className = 'list-disc list-inside';
-
-        activeClients.forEach(client => {
-            const li = document.createElement('li');
-            li.textContent = `Cliente: ${client.host} - Servidor: ${client.server_display_name || client.server_ip}`;
-            ul.appendChild(li);
-        });
-
-        dashboardListDiv.appendChild(ul);
-
-    } catch (error) {
-        console.error('Error al cargar el dashboard de clientes activos desde la BD:', error);
-        dashboardListDiv.textContent = 'Error al cargar clientes activos.';
-    }
-}
-
-
 
 async function addActiveClientToDB(host, serverIp, port, videoFile, serverName) {
     if (!host || !serverIp || !port || !videoFile || !serverName) {
@@ -360,12 +309,14 @@ async function loadActiveClientsFromDB() {
         }
         const data = await response.json();
         if (data.active_clients) {
-            activeFFplayClients = data.active_clients;
+            setActiveClients(data.active_clients);
         } else {
-            activeFFplayClients = [];
+            setActiveClients([]);
         }
+
         updateActiveClientsTable();
-        updateActiveClientsDashboard();
+        updateDashboard();
+        actualizarIconosDeHosts?.(); 
     } catch (error) {
         console.error('Error cargando clientes activos desde la DB:', error);
         showMessageModal('Error', 'No se pudieron cargar los clientes activos: ' + error.message);
@@ -375,10 +326,10 @@ async function loadActiveClientsFromDB() {
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
     loadMininetHosts(); 
-    updateActiveClientsTable(); 
-    updateActiveClientsDashboard();
+    //updateActiveClientsTable(); 
+    //updateActiveClientsDashboard();
     setInterval(() => {
-        updateActiveClientsTable();
-        updateActiveClientsDashboard(); 
+        //updateActiveClientsTable();
+        //updateActiveClientsDashboard(); 
     }, 10000);
 });
