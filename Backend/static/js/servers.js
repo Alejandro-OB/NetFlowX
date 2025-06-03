@@ -106,6 +106,7 @@ document.getElementById('add-server-btn').addEventListener('click', async () => 
 
 async function handleRemoveServer(event) {
     const hostName = event.target.dataset.hostName;
+    const host = window.hostData?.find(h => h.name === hostName);
 
     showMessageModal(
         'Confirmar Eliminación',
@@ -256,31 +257,20 @@ document.getElementById('btn-iniciar-servidor')?.addEventListener('click', async
   const esServidor = window.servidoresActivos?.includes(host.name);
 
   if (esServidor) {
-    // Detener servidor
-    try {
-      const res = await fetch(`${API_BASE_URL}/servers/remove`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ host_name: host.name })
-      });
-      const data = await res.json();
-        await loadActiveClientsFromDB();        // actualiza array + tabla
-        await loadMininetHosts();               // actualiza lista de clientes disponibles
-        await actualizarIconosDeHosts?.();  
-        actualizarIconosDeHosts?.(); 
-        deseleccionarHost?.(host);     // actualiza íconos de topología
-        await updateActiveClientsTable();       // fuerza recarga visual en la tabla
-        await updateDashboard?.();              // actualiza resumen en dashboard
-        await loadActiveServers?.();            // actualiza la lista de servidores
-        await loadTopology?.(); 
-    } catch (e) {
-      console.error(e);
-      showMessageModal('Error', 'No se pudo detener el servidor.');
-    }
+    // Reutilizar flujo completo de eliminación de servidor
+    const fakeEvent = {
+      target: {
+        dataset: {
+          hostName: host.name
+        }
+      }
+    };
+    await handleRemoveServer(fakeEvent);
   } else {
     abrirModalSeleccionVideo(); // Iniciar
   }
 });
+
 
 
 document.getElementById('btn-modal-launch-server')?.addEventListener('click', iniciarServidorDesdeModal);

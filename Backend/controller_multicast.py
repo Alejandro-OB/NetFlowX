@@ -528,9 +528,11 @@ class Controller(app_manager.RyuApp):
         
         self.logger.debug(f"DEBUG: Árbol parseado de dijkstra.py: {parsed_tree_from_dijkstra}")
 
-        # --- INICIO DE LA LÓGICA DE FUSIÓN MEJORADA ---
-        # Construir el árbol final a instalar, fusionando las rutas inter-switch de Dijkstra
-        # con los puertos de host reales de la membresía IGMP para los switches hoja.
+        any_members_left = any(member_switches.values())
+        if not parsed_tree_from_dijkstra and any_members_left:
+            self.logger.error(f"❌ Árbol de Dijkstra vacío para {multicast_group_addr} aunque hay miembros IGMP: {member_switches}")
+            return
+
         final_tree_to_install = {}
         # Considerar todos los DPIDs del árbol de Dijkstra y de los switches miembros de IGMP
         all_involved_dpids = set(parsed_tree_from_dijkstra.keys()).union(set(member_switches.keys()))
@@ -667,52 +669,42 @@ class Controller(app_manager.RyuApp):
     def _remove_multicast_flows(self, multicast_group_addr):
         """
         Re-evalúa y elimina flujos multicast si no quedan miembros para un grupo.
+        Esta versión verifica correctamente si quedan miembros en *algún* switch.
         """
         self.logger.debug(f"DEBUG: Entrando a _remove_multicast_flows para grupo {multicast_group_addr}.")
-        self.logger.debug(f"DEBUG: Intentando adquirir topology_lock en _remove_multicast_flows.")
         try:
             with self.topology_lock:
-                self.logger.debug(f"DEBUG: topology_lock adquirido en _remove_multicast_flows.")
-                # Si no quedan miembros para este grupo multicast, eliminar todos los flujos relacionados
-                if not self.multicast_group_members.get(multicast_group_addr):
-                    self.logger.info(f"No quedan miembros para el grupo multicast {multicast_group_addr}. Eliminando todos los flujos.")
-                    self.logger.debug(f"DEBUG: No quedan miembros para {multicast_group_addr}. Procediendo a eliminar flujos.")
-                    dpids_to_remove_from = list(self.multicast_flow_installed_at.get(multicast_group_addr, set())) # Usar .get con set() para seguridad
-                    self.logger.debug(f"DEBUG: DPIDs con flujos multicast para eliminar: {dpids_to_remove_from}")
-                    
-                    if not dpids_to_remove_from:
-                        self.logger.info(f"No hay switches registrados con flujos para eliminar para {multicast_group_addr}.")
+                # 🚨 Corrección: evaluar todos los switches para ese grupo
+                miembros_por_switch = self.multicast_group_members.get(multicast_group_addr, {})
+                quedan_miembros = any(miembros_por_switch.values())
 
-                    for dpid in dpids_to_remove_from:
-                        self.logger.debug(f"DEBUG: Procesando eliminación de flujo en DPID: {dpid}")
+                if not quedan_miembros:
+                    self.logger.info(f"No quedan miembros para el grupo multicast {multicast_group_addr}. Eliminando todos los flujos.")
+
+                    dpids_a_eliminar = list(self.multicast_flow_installed_at.get(multicast_group_addr, set()))
+                    for dpid in dpids_a_eliminar:
                         if dpid in self.datapaths:
                             datapath = self.datapaths[dpid]
-                            local_parser = datapath.ofproto_parser # Usar el parser del datapath específico
-                            # MODIFICACIÓN: Añadir ip_proto=inet.IPPROTO_UDP para un match más específico
-                            match = local_parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
-                                                                     ipv4_dst=multicast_group_addr,
-                                                                     ip_proto=inet.IPPROTO_UDP) # Asegura que solo el tráfico UDP coincida
-                            self.logger.debug(f"DEBUG: Llamando a remove_flow_by_match para {dpid} con match {match}")
+                            parser = datapath.ofproto_parser
+                            match = parser.OFPMatch(
+                                eth_type=ether_types.ETH_TYPE_IP,
+                                ipv4_dst=multicast_group_addr,
+                                ip_proto=inet.IPPROTO_UDP
+                            )
                             self.remove_flow_by_match(datapath, match)
-                            self.logger.info(f"Flujo multicast eliminado para {multicast_group_addr} en switch {dpid}.")
+                            self.logger.info(f"Flujo multicast eliminado en switch {dpid} para {multicast_group_addr}.")
                         else:
-                            self.logger.warning(f"ADVERTENCIA: Datapath {dpid} no encontrado en self.datapaths al intentar eliminar flujo para {multicast_group_addr}.")
-                    self.multicast_flow_installed_at[multicast_group_addr].clear() # Limpiar el registro
-                    # Si no quedan entradas para este grupo, eliminarlo completamente del diccionario principal
-                    if not self.multicast_flow_installed_at[multicast_group_addr]:
-                        del self.multicast_flow_installed_at[multicast_group_addr]
-                        self.logger.debug(f"DEBUG: Grupo {multicast_group_addr} completamente eliminado de multicast_flow_installed_at.")
+                            self.logger.warning(f"Switch {dpid} no encontrado al intentar eliminar flujo para {multicast_group_addr}.")
+
+                    self.multicast_flow_installed_at.pop(multicast_group_addr, None)
+                    self._last_installed_tree.pop(multicast_group_addr, None)
                 else:
-                    # Si todavía hay miembros, recalcular y reinstalar los flujos
-                    self.logger.info(f"El grupo multicast {multicast_group_addr} todavía tiene miembros. Re-evaluando y reinstalando flujos.")
-                    self.logger.debug(f"DEBUG: Todavía hay miembros para {multicast_group_addr}. Reinstalando flujos.")
+                    self.logger.info(f"Aún quedan miembros activos para {multicast_group_addr}. Reinstalando flujos.")
                     self._install_multicast_flows(multicast_group_addr)
-            self.logger.debug(f"DEBUG: topology_lock liberado en _remove_multicast_flows.")
+
         except Exception as e:
-            self.logger.error(f"ERROR: Excepción en _remove_multicast_flows para {multicast_group_addr}: {e}", exc_info=True)
-            # Asegurarse de liberar el lock si se adquirió antes de la excepción (aunque 'with' debería manejarlo)
-            # No hay necesidad de liberar explícitamente el lock en un 'finally' porque el 'with' statement lo hace.
-        self.logger.debug(f"DEBUG: Saliendo de _remove_multicast_flows para grupo {multicast_group_addr}.")
+            self.logger.error(f"Error en _remove_multicast_flows para {multicast_group_addr}: {e}", exc_info=True)
+
 
     @set_ev_cls(ofp_event.EventOFPStateChange, [MAIN_DISPATCHER, DEAD_DISPATCHER])
     def _state_change_handler(self, ev):
