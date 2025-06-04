@@ -34,3 +34,76 @@ body {
 html, body {
   height: 100%;
 }
+
+/* === Estilos para el dashboard de estadísticas === */
+.resumen {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+.resumen p {
+  font-size: 1.2rem;
+  background: #f3f4f6;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  flex: 1 1 200px;
+}
+
+#grafico-clientes {
+  margin: 1rem 0;
+}
+
+.barra {
+  background: #3b82f6;
+  color: white;
+  padding: 0.5rem;
+  margin: 0.3rem 0;
+  border-radius: 0.25rem;
+  font-weight: 500;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+table th, table td {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #ddd;
+}
+
+table th {
+  background: #f9fafb;
+  text-align: left;
+}
+
+#lista-eventos {
+  list-style: disc inside;
+  padding-left: 1rem;
+  margin-top: 1rem;
+}
+
+.barra-contenedor {
+  background: #f1f5f9;
+  margin: 0.5rem 0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.barra-servidor {
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
+  color: white;
+  padding: 0.4rem 1rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+#lista-eventos {
+  margin-top: 1rem;
+  padding-left: 1rem;
+  list-style: disc inside;
+  font-size: 0.95rem;
+}

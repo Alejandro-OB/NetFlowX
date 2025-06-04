@@ -1,45 +1,83 @@
-from flask import Blueprint, jsonify, request
+# Nuevo endpoint Flask: stats_dashboard.py
+from flask import Blueprint, jsonify
 from services.db import fetch_all
 
 bp = Blueprint('stats', __name__)
 
-@bp.route('/resumen', methods=['GET'])
-def obtener_estadisticas():
-    query = """
-        SELECT tipo, COUNT(*) AS total
-        FROM estadisticas
-        GROUP BY tipo;
-    """
-    data = fetch_all(query)
-    return jsonify(data), 200
+from services.db import fetch_one, execute_query
+import logging
+
+def registrar_evento(tipo, nombre_host):
+    try:
+        host = fetch_one("SELECT id_host FROM hosts WHERE nombre = %s", (nombre_host,))
+        if host:
+            execute_query(
+                "INSERT INTO estadisticas (id_host, tipo, timestamp) VALUES (%s, %s, NOW())",
+                (host['id_host'], tipo)
+            )
+        else:
+            logging.warning(f"No se encontró el host '{nombre_host}' para registrar evento '{tipo}'")
+    except Exception as e:
+        logging.error(f"Error al registrar evento '{tipo}' para host '{nombre_host}': {str(e)}")
 
 
-@bp.route('/logs', methods=['GET'])
-def obtener_logs():
-    tipo = request.args.get('tipo')
-    fecha = request.args.get('fecha')  # formato: YYYY-MM-DD
+@bp.route('/dashboard', methods=['GET'])
+def get_dashboard_stats():
+    try:
+        # 1. Clientes por servidor
+        clientes_por_servidor = fetch_all("""
+            SELECT servidor_asignado AS servidor, COUNT(*) AS total_clientes
+            FROM clientes_activos
+            GROUP BY servidor_asignado;
+        """)
 
-    condiciones = []
-    parametros = []
+        # 2. Total de transmisiones (grupos multicast activos)
+        transmisiones_activas = fetch_all("""
+            SELECT COUNT(DISTINCT ip_destino) AS total_transmisiones
+            FROM servidores_vlc_activos
+            WHERE status = 'activo';
+        """)[0]['total_transmisiones']
 
-    if tipo:
-        condiciones.append("e.tipo = %s")
-        parametros.append(tipo)
+        # 3. Clientes activos totales
+        total_clientes = fetch_all("""
+            SELECT COUNT(*) AS total_clientes
+            FROM clientes_activos;
+        """)[0]['total_clientes']
 
-    if fecha:
-        condiciones.append("DATE(e.timestamp) = %s")
-        parametros.append(fecha)
+        # 4. Carga vs peso
+        carga_vs_peso = fetch_all("""
+            SELECT s.host_name AS servidor, s.server_weight AS peso_configurado,
+                   COUNT(c.host_cliente) AS clientes_asignados
+            FROM servidores_vlc_activos s
+            LEFT JOIN clientes_activos c ON c.servidor_asignado = s.host_name
+            WHERE s.status = 'activo'
+            GROUP BY s.host_name, s.server_weight;
+        """)
 
-    where_clause = f"WHERE {' AND '.join(condiciones)}" if condiciones else ""
+        # 5. Últimos eventos (limitado a 10)
+        ultimos_eventos = fetch_all("""
+            SELECT h.nombre AS host, e.tipo AS tipo_evento, e.timestamp
+            FROM estadisticas e
+            JOIN hosts h ON e.id_host = h.id_host
+            ORDER BY e.timestamp DESC
+            LIMIT 10;
+        """)
 
-    query = f"""
-        SELECT h.nombre AS origen, e.tipo AS tipo_evento, 'Evento registrado' AS mensaje, e.timestamp AS fecha
-        FROM estadisticas e
-        JOIN hosts h ON e.id_host = h.id_host
-        {where_clause}
-        ORDER BY e.timestamp DESC
-        LIMIT 50;
-    """
+        # 6. Total de flujos multicast activos (suma de puertos IGMP por grupo)
+        flujos_multicast = fetch_all("""
+            SELECT ip_destino AS grupo, COUNT(*) AS total_puertos
+            FROM clientes_activos
+            GROUP BY ip_destino;
+        """)
 
-    data = fetch_all(query, parametros)
-    return jsonify(data), 200
+        return jsonify({
+            "clientes_por_servidor": clientes_por_servidor,
+            "transmisiones_activas": transmisiones_activas,
+            "total_clientes": total_clientes,
+            "carga_vs_peso": carga_vs_peso,
+            "ultimos_eventos": ultimos_eventos,
+            "flujos_multicast": flujos_multicast
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": f"Error al generar estadísticas: {str(e)}"}), 500

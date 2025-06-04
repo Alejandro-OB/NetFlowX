@@ -62,6 +62,7 @@ async function lanzarServidor({ hostName, videoPath, peso = 1 }) {
       deseleccionarHost(hostName);
       loadTopology?.();
       cerrarModal?.(); 
+      cargarEstadisticas();
       return { success: true, message: data.message };
     } else {
       cerrarModal?.(); 
@@ -137,7 +138,8 @@ async function handleRemoveServer(event) {
                     await updateActiveClientsTable();       // fuerza recarga visual en la tabla
                     await updateDashboard?.();              // actualiza resumen en dashboard
                     await loadActiveServers?.();            // actualiza la lista de servidores
-                    await loadTopology?.();                 // recarga visual de topología
+                    await loadTopology?.();  
+                    cargarEstadisticas();               // recarga visual de topología
 
                     showMessageModal('Éxito', data.message || 'Servidor eliminado.');
                 } else {

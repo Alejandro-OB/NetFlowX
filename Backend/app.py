@@ -4,7 +4,7 @@ import logging
 
 # Blueprints
 from routes.topology import topology_bp
-from routes import config, stats
+from routes import config
 from routes.reglas import reglas_bp
 # Configuración desde archivo externo
 from config import Config
@@ -19,6 +19,8 @@ from routes.servers import servers_bp
 from routes.client_requests import client_requests_bp
 from routes.dijkstra import dijkstra_bp
 from routes.igmp_server import igmp_bp
+from routes.stats import bp as stats_dashboard_bp
+
 
 def get_db():
     """
@@ -44,13 +46,15 @@ def create_app():
     # Registro de Blueprints
     app.register_blueprint(topology_bp, url_prefix='/topology')
     app.register_blueprint(config.bp, url_prefix='/config')
-    app.register_blueprint(stats.bp, url_prefix='/stats')
+    #app.register_blueprint(stats.bp, url_prefix='/stats')
     app.register_blueprint(reglas_bp, url_prefix='/reglas')
     app.register_blueprint(video_bp, url_prefix='/config/video')
     app.register_blueprint(servers_bp, url_prefix='/servers')
     app.register_blueprint(client_requests_bp, url_prefix='/client')
     app.register_blueprint(dijkstra_bp, url_prefix='/dijkstra')
     app.register_blueprint(igmp_bp, url_prefix='/igmp')
+    app.register_blueprint(stats_dashboard_bp, url_prefix='/stats')
+
 
     # Rutas utilitarias
     @app.route('/')

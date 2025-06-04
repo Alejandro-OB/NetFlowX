@@ -4,6 +4,8 @@ import re
 import os
 import requests
 from datetime import datetime
+from routes.stats import registrar_evento
+
 
 from config import Config
 from services.db import fetch_all, fetch_one, execute_query  # Importamos las funciones desde db.py
@@ -78,6 +80,7 @@ def iniciar_servidor_hosts_table():
                 last_updated   = CURRENT_TIMESTAMP
             RETURNING process_pid;
         """
+        registrar_evento("SERVIDOR_INICIADO", host_name)
         result = execute_query(query_vlc, (host_name, video_path, multicast_ip, multicast_port, server_weight))
         if result is False:
             return jsonify({"error": "No se pudo insertar/actualizar servidor VLC en la base de datos."}), 500
@@ -117,15 +120,7 @@ def iniciar_servidor_hosts_table():
 
 @servers_bp.route('/remove', methods=['POST'])
 def remover_servidor_hosts_table():
-    """
-    Ruta POST /remove:
-    1. Recibe JSON con { "host_name": str }
-    2. Busca el registro en servidores_vlc_activos
-    3. Si existe, elimina clientes asociados (BD + agente)
-    4. Borra el servidor de la BD
-    5. Llama al agente Mininet para detener FFmpeg
-    6. Devuelve JSON con mensaje de éxito o error
-    """
+
     data = request.get_json()
     nombre = data.get('host_name')
     if not nombre:
@@ -164,6 +159,7 @@ def remover_servidor_hosts_table():
             "DELETE FROM clientes_activos WHERE servidor_asignado = %s;",
             (nombre,)
         )
+        registrar_evento("SERVIDOR_ELIMINADO", nombre)
 
         # Eliminar el servidor de la BD
         ok_vlc = execute_query("DELETE FROM servidores_vlc_activos WHERE host_name = %s;", (nombre,))

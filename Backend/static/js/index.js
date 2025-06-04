@@ -578,59 +578,8 @@ document.getElementById('save-edited-link-btn')?.addEventListener('click', async
   }
 });
 
-// =======================================
-//  ESTADÍSTICAS: cargar y mostrar datos
-// =======================================
-async function cargarEstadisticas() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/stats/resumen`);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: 'Unknown error' }));
-      throw new Error(`HTTP ${res.status}: ${err.message || res.statusText}`);
-    }
-    const data = await res.json();
-    const tbody = document.getElementById('tabla-estadisticas');
-    if (!tbody) return;
-    tbody.innerHTML = '';
 
-    data.forEach(row => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td class="p-2">${row.tipo}</td>
-        <td class="p-2">${row.total}</td>`;
-      tbody.appendChild(tr);
-    });
-  } catch (err) {
-    console.error('Error cargarEstadisticas():', err);
-    // Opcional: mostrar modal de error
-  }
-}
 
-// =======================================
-//  LOGS: cargar y mostrar datos
-// =======================================
-async function cargarLogs() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/stats/logs`);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: 'Unknown error' }));
-      throw new Error(`HTTP ${res.status}: ${err.message || res.statusText}`);
-    }
-    const data = await res.json();
-    const list = document.getElementById('lista-logs');
-    if (!list) return;
-    list.innerHTML = '';
-
-    data.forEach(log => {
-      const li = document.createElement('li');
-      li.innerHTML = `<span class="font-semibold text-blue-600">${log.origen}</span> - ${log.tipo_evento} - ${log.fecha}`;
-      list.appendChild(li);
-    });
-  } catch (err) {
-    console.error('Error cargarLogs():', err);
-    // Opcional: mostrar modal de error
-  }
-}
 
 // =======================================
 //  Inicialización al cargar la página
@@ -641,6 +590,5 @@ document.addEventListener('DOMContentLoaded', () => {
   loadTopology();
   loadActiveLinks();
   cargarEstadisticas();
-  cargarLogs();
   loadConfigHistory();
 });

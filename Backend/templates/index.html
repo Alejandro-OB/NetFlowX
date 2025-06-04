@@ -23,7 +23,7 @@
         <a href="#config" class="text-gray-600 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors">Configuración</a>
         <a href="#servers" class="text-gray-600 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors">Servidores</a>
         <a href="#clients" class="text-gray-600 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors">Clientes Multicast</a>
-        <a href="#stats" class="text-gray-600 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors">Estadísticas</a>
+        <a href="#estadisticas-dashboard" class="text-gray-600 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors">Estadísticas</a>
       </nav>
     </div>
   </header>
@@ -323,18 +323,33 @@
 
     
 
-    <section id="stats" class="mb-12 p-6 bg-white rounded-lg shadow-md">
-      <h2 class="text-2xl font-semibold text-gray-800 mb-4">Estadísticas de Red</h2>
-      <p class="text-gray-700">Aquí se mostrarán las estadísticas de tráfico y rendimiento.</p>
+    <section id="estadisticas-dashboard" style="margin-top: 2rem;">
+      <h2>Estadísticas de la Red</h2>
+
+      <div class="resumen">
+        <p>Clientes activos: <span id="total-clientes">0</span></p>
+        <p>Transmisiones activas: <span id="total-transmisiones">0</span></p>
+        <p>Grupos multicast: <span id="total-grupos">0</span></p>
+      </div>
+
+      <div id="grafico-clientes" class="grafico-clientes"></div>
+
+      <table>
+        <thead>
+          <tr><th>Servidor</th><th>Clientes</th><th>Peso</th></tr>
+        </thead>
+        <tbody id="tabla-carga"></tbody>
+      </table>
+
+      <div class="mt-8">
+        <h3 class="text-xl font-semibold text-gray-700 mb-3">Últimos eventos</h3>
+        <ul id="lista-eventos" class="list-disc list-inside text-gray-600 space-y-1"></ul>
+      </div>
+
     </section>
 
-    <section id="help" class="p-6 bg-blue-100 rounded-lg shadow-md transition-all"> <p class="text-gray-700">Consulta la <a href="#" class="underline hover:text-blue-700">documentación completa</a> o utiliza nuestros recursos:</p>
-        <ul class="list-disc list-inside text-gray-700">
-          <li><a href="#" class="hover:text-blue-700">Guía rápida de inicio</a></li>
-          <li><a href="#" class="hover:text-blue-700">Tutorial de integración API</a></li>
-          <li><a href="#" class="hover:text-blue-700">FAQs</a></li>
-        </ul>
-      </section>
+
+
 
   </main>
 
@@ -387,5 +402,7 @@
   <script src="../static/js/servers.js"></script>
   <script src="../static/js/clients.js"></script>
   <script src="../static/js/topology.js"></script>
+  <script src="../static/js/stats.js"></script>
+
 </body>
 </html>

@@ -4,20 +4,20 @@ import threading
 import time
 from datetime import datetime # Importar datetime para el formato de fecha
 from services.db import execute_query
+from routes.stats import registrar_evento
 
 client_requests_bp = Blueprint('client_requests', __name__)
 
-# --- Estado en memoria para Round Robin y Weighted Round Robin ---
-# Usando un Lock para la seguridad de los hilos si múltiples solicitudes de clientes llegan concurrentemente
+
 rr_lock = threading.Lock()
-rr_index = 0 # Índice para el algoritmo Round Robin
+rr_index = 0 
 
-active_servers_cache = [] # Para almacenar datos del servidor: {host_name, ip_destino, puerto, server_weight}
-last_cache_update = 0 # Timestamp de la última actualización de la caché de servidores
-CACHE_TTL = 10 # segundos para refrescar la lista de servidores de la DB
+active_servers_cache = [] 
+last_cache_update = 0
+CACHE_TTL = 10 
 
-wrr_server_list = [] # Lista expandida para Weighted Round Robin
-last_wrr_list_update = 0 # Timestamp de la última actualización de la lista WRR
+wrr_server_list = [] 
+last_wrr_list_update = 0 
 
 def refresh_active_servers_cache():
     """
@@ -27,7 +27,6 @@ def refresh_active_servers_cache():
     if time.time() - last_cache_update > CACHE_TTL:
         print("Refrescando la caché de servidores activos...")
         query = "SELECT host_name, ip_destino, puerto, server_weight FROM servidores_vlc_activos WHERE status = 'activo';"
-        # fetch_all devuelve una lista de diccionarios si usas DictCursor
         active_servers_cache = fetch_all(query)
         last_cache_update = time.time()
     return active_servers_cache
@@ -39,14 +38,11 @@ def generate_wrr_list():
     """
     global wrr_server_list, last_wrr_list_update
     
-    # Asegurarse de que la caché de servidores activos esté fresca antes de generar la lista WRR
     servers_from_cache = refresh_active_servers_cache()
 
-    # Regenerar la lista WRR solo si la caché de servidores ha cambiado
-    # o si ha pasado el TTL de la lista WRR
     if time.time() - last_wrr_list_update > CACHE_TTL or \
        len(servers_from_cache) != len(active_servers_cache) or \
-       any(server not in servers_from_cache for server in active_servers_cache): # Comprobación simple de cambio
+       any(server not in servers_from_cache for server in active_servers_cache): 
         
         print("Generando la lista de servidores WRR...")
         new_wrr_list = []
@@ -63,26 +59,24 @@ def get_multicast_stream_info():
     Endpoint para que los clientes soliciten información del stream multicast.
     Aplica el algoritmo de balanceo de carga configurado (RR o WRR).
     """
-    # Mover la declaración global al inicio de la función
     global rr_index 
 
     try:
-        # Obtener el algoritmo de balanceo de carga actual de la configuración
         current_config = fetch_one("SELECT algoritmo_balanceo FROM configuracion ORDER BY fecha_activacion DESC LIMIT 1;")
         algoritmo_balanceo = current_config['algoritmo_balanceo'] if current_config else None
 
         selected_server = None
 
         if algoritmo_balanceo == 'round_robin':
-            with rr_lock: # Proteger el acceso al índice RR
+            with rr_lock: 
                 servers = refresh_active_servers_cache()
                 if servers:
                     selected_server = servers[rr_index % len(servers)]
-                    rr_index = (rr_index + 1) % len(servers) # Incrementar y volver al principio
+                    rr_index = (rr_index + 1) % len(servers) 
                 else:
                     print("No hay servidores activos para Round Robin.")
         elif algoritmo_balanceo == 'weighted_round_robin':
-            with rr_lock: # Proteger el acceso al índice WRR
+            with rr_lock: 
                 servers_wrr = generate_wrr_list()
                 if servers_wrr:
                     selected_server = servers_wrr[rr_index % len(servers_wrr)]
@@ -90,7 +84,6 @@ def get_multicast_stream_info():
                 else:
                     print("No hay servidores activos para Weighted Round Robin.")
         else:
-            # Si no hay algoritmo configurado o es desconocido, usar RR por defecto
             print(f"Algoritmo de balanceo desconocido o no configurado ({algoritmo_balanceo}). Usando Round Robin por defecto.")
             servers = refresh_active_servers_cache()
             if servers:
@@ -177,7 +170,7 @@ def add_active_client():
         execute_query(insert_query, (
             host_cliente, servidor_asignado, ip_destino, puerto, video_solicitado, timestamp_inicio, hora_asignacion
         ))
-
+        registrar_evento("CLIENTE_ACTIVADO", host_cliente)
         return jsonify({"success": True, "message": f"Cliente {host_cliente} añadido a clientes_activos."}), 201
     except Exception as e:
         return jsonify({"error": f"Error al insertar cliente activo: {str(e)}"}), 500
@@ -194,6 +187,7 @@ def remove_active_client():
     try:
         delete_query = "DELETE FROM clientes_activos WHERE host_cliente = %s;"
         execute_query(delete_query, (host_cliente,))
+        registrar_evento("CLIENTE_ELIMINADO", host_cliente)
         return jsonify({"success": True, "message": f"Cliente {host_cliente} eliminado."}), 200
     except Exception as e:
         return jsonify({"error": f"Error al eliminar cliente activo: {str(e)}"}), 500

@@ -151,6 +151,7 @@ async function startFFmpegClient(host, streamInfo) {
             actualizarIconosDeHosts?.();
             deseleccionarHost?.(host);
             loadTopology?.();
+            cargarEstadisticas();
         } else {
             showMessageModal('Error', `Error al iniciar FFplay: ${data.error || 'Error desconocido'}`);
         }
@@ -187,6 +188,7 @@ async function stopFFmpegClient(host, ffplayPid = null) {
                 actualizarIconosDeHosts?.(); 
                 deseleccionarHost?.(host); 
                 loadTopology?.();
+                cargarEstadisticas();
             } else {
                 showMessageModal('Error', `Error al detener FFplay: ${data.error || 'Error desconocido'}`);
             }
@@ -331,10 +333,4 @@ async function loadActiveClientsFromDB() {
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
     loadMininetHosts(); 
-    //updateActiveClientsTable(); 
-    //updateActiveClientsDashboard();
-    setInterval(() => {
-        //updateActiveClientsTable();
-        //updateActiveClientsDashboard(); 
-    }, 10000);
 });
