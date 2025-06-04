@@ -323,27 +323,30 @@
 
     
 
-    <section id="estadisticas-dashboard" style="margin-top: 2rem;">
-      <h2>Estadísticas de la Red</h2>
+    <section id="estadisticas-dashboard" class="mb-12 p-6 bg-white rounded-lg shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-800 mb-4">Estadísticas de la red</h2>
+      <div class="space-y-4"></div>
+        <div class="resumen">
+          <p>Clientes activos: <span id="total-clientes">0</span></p>
+          <p>Transmisiones activas: <span id="total-transmisiones">0</span></p>
+          <p>Grupos multicast: <span id="total-grupos">0</span></p>
+        </div>
 
-      <div class="resumen">
-        <p>Clientes activos: <span id="total-clientes">0</span></p>
-        <p>Transmisiones activas: <span id="total-transmisiones">0</span></p>
-        <p>Grupos multicast: <span id="total-grupos">0</span></p>
-      </div>
+        <div id="grafico-clientes" class="grafico-clientes"></div>
 
-      <div id="grafico-clientes" class="grafico-clientes"></div>
+        <table>
+          <thead>
+            <tr><th>Servidor</th><th>Clientes</th><th>Peso</th></tr>
+          </thead>
+          <tbody id="tabla-carga"></tbody>
+        </table>
 
-      <table>
-        <thead>
-          <tr><th>Servidor</th><th>Clientes</th><th>Peso</th></tr>
-        </thead>
-        <tbody id="tabla-carga"></tbody>
-      </table>
-
-      <div class="mt-8">
-        <h3 class="text-xl font-semibold text-gray-700 mb-3">Últimos eventos</h3>
-        <ul id="lista-eventos" class="list-disc list-inside text-gray-600 space-y-1"></ul>
+        <div class="mt-8">
+          <h3 class="text-xl font-semibold text-gray-700 mb-3">Últimos eventos</h3>
+          <ul id="lista-eventos" class="list-disc list-inside text-gray-600 space-y-1"></ul>
+        </div>
+        <table id="tabla-estadisticas" class="tabla-stats"></table>
+        <button onclick="cargarEstadisticasConRutas()">Actualizar estadísticas</button>
       </div>
 
     </section>
