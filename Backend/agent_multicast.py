@@ -6,7 +6,7 @@ import signal
 import time
 import sys
 import traceback
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS # Importar CORS
 import psycopg2
 
@@ -22,15 +22,17 @@ ffmpeg_server_processes = {}
 # Formato: { "h1_1": {"pid": ffplay_client_pid, "host_pid": mininet_host_pid_on_agent_machine} }
 ffplay_client_processes = {}
 
+DB_CONFIG = {
+    "dbname": "geant_network",  # Nombre de la base de datos
+    "user": "geant_user",       # Usuario de la base de datos
+    "password": "geant",        # Contraseña del usuario
+    "host": "192.168.18.151",  # Dirección IP o hostname del servidor de la base de datos
+    "port": "5432"             # Puerto de la base de datos (por defecto para PostgreSQL es 5432)
+}
+
 def limpiar_servidores_activos():
     try:
-        conn = psycopg2.connect(
-            dbname="geant_network",
-            user="geant_user",
-            password="geant",
-            host="192.168.18.151",
-            port="5432"
-        )
+        conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
         cur.execute("DELETE FROM servidores_vlc_activos;")
         conn.commit()
@@ -343,36 +345,200 @@ def ping_between_hosts():
 
     return Response(generate(), mimetype='text/event-stream')
 
-@app.route('/mininet/ping_between_hosts_stream')
+def get_host_db_info(identifier):
+    """
+    Obtiene la información (id_host, nombre, ipv4) de un host
+    dado su nombre o su dirección IPv4.
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cur = conn.cursor()
+
+        # Intentar encontrar por nombre (columna 'nombre')
+        cur.execute("SELECT id_host, nombre, ipv4 FROM hosts WHERE nombre = %s;", (identifier,))
+        result = cur.fetchone()
+        if result:
+            return {"id_host": result[0], "nombre": result[1], "ipv4": result[2]}
+
+        # Si no se encuentra por nombre, intentar por IPv4 (columna 'ipv4')
+        cur.execute("SELECT id_host, nombre, ipv4 FROM hosts WHERE ipv4 = %s;", (identifier,))
+        result = cur.fetchone()
+        if result:
+            return {"id_host": result[0], "nombre": result[1], "ipv4": result[2]}
+
+        return None
+    except Exception as e:
+        print(f"Error al obtener información del host para {identifier}: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def parse_ping_output(ping_output):
+
+    # Usamos una expresión regular para extraer la latencia y el jitter
+    rtt_match = re.search(r'rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/([\d.]+) ms', ping_output)
+    
+    if rtt_match:
+        avg_rtt = float(rtt_match.group(1))  # Extraemos el valor de la latencia promedio (avg)
+        jitter = float(rtt_match.group(2))   # Extraemos el valor de jitter (mdev)
+        return avg_rtt, jitter
+
+    return None, None  # Si no se encuentra, retornamos None para ambos valores
+
+
+
+@app.route('/mininet/ping_between_hosts_stream', methods=['GET'])
 def ping_between_hosts_stream():
-    from flask import Response, request
+    data = request.args  # Obtener parámetros de la URL (query string)
+    origen_identifier = data.get('origen')
+    destino_identifier = data.get('destino')
 
-    origen = request.args.get('origen')
-    destino = request.args.get('destino')
+    # Asegúrate de que los parámetros se conviertan a tipos correctos, con valores por defecto
+    try:
+        ping_count = int(data.get('count', 1))
+        interval = float(data.get('interval', 1))
+    except ValueError:
+        return Response("data: ERROR: Parámetros 'count' o 'interval' inválidos.\n\n", mimetype='text/event-stream'), 400
 
-    if not origen or not destino:
-        return Response("data: Faltan parámetros: origen y destino\n\n", mimetype='text/event-stream')
+    if not origen_identifier or not destino_identifier:
+        return Response("data: ERROR: Parámetros 'origen' y 'destino' son requeridos.\n\n", mimetype='text/event-stream'), 400
 
-    pid_origen = get_host_pid(origen)
-    if not pid_origen:
-        return Response(f"data: No se encontró PID para {origen}\n\n", mimetype='text/event-stream')
+    # Usa la función get_host_db_info para obtener la información completa del host
+    origen_info = get_host_db_info(origen_identifier)
+    destino_info = get_host_db_info(destino_identifier)
 
-    def generate():
+    if not origen_info:
+        print(f"Agente: No se encontró información para el host de origen: {origen_identifier}")
+        return Response(f"data: ERROR: No se encontró información para el host de origen: {origen_identifier}\n\n", mimetype='text/event-stream'), 404
+    if not destino_info:
+        print(f"Agente: No se encontró información para el host de destino: {destino_identifier}")
+        return Response(f"data: ERROR: No se encontró información para el host de destino: {destino_identifier}\n\n", mimetype='text/event-stream'), 404
+
+    # Ahora utilizamos los ID de los hosts para la consulta en la base de datos
+    id_origen = origen_info["id_host"]
+    id_destino = destino_info["id_host"]
+    nombre_origen = origen_info["nombre"]
+    nombre_destino = destino_info["nombre"]
+    ping_target_ip = destino_info["ipv4"]
+    def generate_ping_stream():
+        conn = None
+        cur = None
+        id_latencia = None
+        ping_process = None
+
         try:
-            cmd = ['mnexec', '-a', str(pid_origen), 'ping', '-c', '3', destino]
-            print(f"[DEBUG] Ejecutando: {' '.join(cmd)}")
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+            time.sleep(5)
+            # Usamos los ID de los hosts para buscar la ruta en la base de datos
+            cur.execute(
+                "SELECT id_ruta FROM rutas_ping WHERE host_origen = %s AND host_destino = %s;",
+                (id_origen, id_destino)  # Usamos los ID en vez de los nombres
+            )
+            ruta_result = cur.fetchone()
 
-            for line in iter(process.stdout.readline, ''):
-                yield f"data: {line.strip()}\n\n"
-                time.sleep(0.2)
+            if ruta_result:
+                id_ruta = ruta_result[0]
+            else:
+                # Si no se encuentra la ruta, podemos manejarlo como un error
+                raise ValueError(f"No se encontró la ruta entre los hosts {id_origen} y {id_destino} en la tabla rutas_ping.")
 
-            process.stdout.close()
-            process.wait()
+            # Insertar registro inicial en la tabla de latencia, ahora con id_ruta
+            cur.execute(
+                "INSERT INTO latencias (host_origen, host_destino, timestamp, id_ruta) VALUES (%s, %s, NOW(), %s) RETURNING id_latencia;",
+                (nombre_origen, nombre_destino, id_ruta)  # Utilizamos los nombres de los hosts
+            )
+            id_latencia = cur.fetchone()[0]
+            conn.commit()
+            yield f"data: Ping iniciado (ID de registro en BD: {id_latencia})...\n\n"
+
+            pid_origen = get_host_pid(nombre_origen)
+            if not pid_origen:
+                yield "data: ERROR: No se encontró PID para el host origen.\n\n"
+                return
+
+            # Comando ping dentro del ambiente Mininet
+            ping_command = ['mnexec', '-a', str(pid_origen), 'ping', '-c', '3', ping_target_ip]
+            yield f"data: Ejecutando Ping entre {nombre_origen} y {nombre_destino}\n\n"
+
+            ping_process = subprocess.Popen(
+                ping_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Dirigir stderr a stdout para capturar todos los mensajes
+                text=True
+            )
+
+            full_output_lines = []
+            # Leer y enviar la salida línea por línea
+            for line in iter(ping_process.stdout.readline, ''):
+                full_output_lines.append(line)
+                yield f"data: {line.strip()}\n\n"  # Enviar cada línea de la salida del ping
+
+            ping_process.stdout.close()
+            return_code = ping_process.wait(timeout=(ping_count * interval * 2 + 5))  # Esperar a que el proceso termine
+
+            stdout_str = "".join(full_output_lines)
+
+            if return_code == 0:
+                # Parsear la salida para obtener el promedio de latencia y jitter
+                latency_match = re.search(r"rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/([\d.]+) ms", stdout_str)
+                if latency_match:
+                    avg_latency = float(latency_match.group(1))
+                    jitter = float(latency_match.group(2))  # mdev es usado como jitter
+
+                    # Actualizar la base de datos con la latencia, jitter y id_ruta en la tabla 'latencias'
+                    cur.execute(
+                        "UPDATE latencias SET rtt_ms = %s, jitter_ms = %s WHERE id_latencia = %s;",
+                        (avg_latency, jitter, id_latencia)  # Solo insertamos jitter y rtt
+                    )
+                    conn.commit()
+                    yield f"data: --- FIN DE PING ---\n\n"
+                    yield f"data: Latencia promedio: {avg_latency} ms\n\n"
+                    yield f"data: Jitter: {jitter} ms\n\n"
+                    yield f"data: STATUS: success\n\n"
+                else:
+                    error_message = "No se pudo parsear la latencia o jitter del ping."
+                    yield f"data: ERROR: {error_message}. Salida completa: {stdout_str}\n\n"
+                    yield f"data: STATUS: error\n\n"
+            else:
+                error_message = f"El comando ping falló con código de salida {return_code}."
+                yield f"data: ERROR: {error_message}. Salida completa: {stdout_str}\n\n"
+                yield f"data: STATUS: error\n\n"
+
+        except subprocess.TimeoutExpired:
+            if ping_process:
+                ping_process.kill()
+                ping_process.communicate()  # Asegurar que las tuberías se vacíen después de matar
+            error_message = "El comando ping excedió el tiempo de espera."
+            if conn and cur and id_latencia:
+                cur.execute(
+                    "UPDATE latencias SET exit_code = %s WHERE id_latencia = %s;",
+                    (124, error_message, id_latencia)  # 124 es un código común para timeout en shells
+                )
+                conn.commit()
+            yield f"data: ERROR: {error_message}\n\n"
+            yield f"data: STATUS: error\n\n"
         except Exception as e:
-            yield f"data: ERROR: {str(e)}\n\n"
+            error_message = f"Error interno en el agente al ejecutar ping: {e}"
+            import traceback
+            traceback.print_exc()  # Imprimir el traceback completo para depuración
+            if conn and cur and id_latencia:
+                cur.execute(
+                    "UPDATE latencias SET error_message = %s WHERE id_latencia = %s;",
+                    (error_message, id_latencia)
+                )
+                conn.commit()
+            yield f"data: ERROR: {error_message}\n\n"
+            yield f"data: STATUS: error\n\n"
+        finally:
+            if conn:
+                conn.close()
 
-    return Response(generate(), mimetype='text/event-stream')
+    # Devolver la respuesta como un Server-Sent Event stream
+    return Response(generate_ping_stream(), mimetype='text/event-stream')
+
 
 def crear_patch(id_origen, id_destino, bw_mbps, puerto_origen, puerto_destino):
     swA = f"s{id_origen}"
@@ -436,10 +602,9 @@ def crear_patch(id_origen, id_destino, bw_mbps, puerto_origen, puerto_destino):
     return ports_reales, warning_msgs, tc_errors
 
 
-# --- REEMPLAZAMOS add_link para que use crear_patch(...) ---
 @app.route('/mininet/add_link', methods=['POST'])
 def add_link():
-    import traceback  # ✅ asegúrate de importar traceback
+    import traceback  
 
     try:
         data = request.get_json() or {}
@@ -450,14 +615,7 @@ def add_link():
         if id_origen == id_destino or bw_mbps <= 0:
             return jsonify({"error": "Parámetros inválidos"}), 400
 
-        # ✅ CONSULTAR LOS PUERTOS desde la BD
-        conn = psycopg2.connect(
-            dbname="geant_network",
-            user="geant_user",
-            password="geant",
-            host="192.168.18.151",
-            port="5432",
-        )
+        conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
         cur.execute("""
             SELECT puerto_origen, puerto_destino
@@ -519,13 +677,7 @@ def update_link():
             return jsonify({"error": "IDs y ancho de banda deben ser enteros positivos"}), 400
 
         # === 1) ELIMINAR INTERFACES ANTIGUAS ===
-        conn = psycopg2.connect(
-            dbname="geant_network",
-            user="geant_user",
-            password="geant",
-            host="192.168.18.151",
-            port="5432",
-        )
+        conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
         cur.execute("""
             SELECT puerto_origen, puerto_destino, id_origen_switch, id_destino_switch
@@ -562,13 +714,7 @@ def update_link():
         for intento in range(3):
             print(f"[AGENTE] Intento {intento+1}: buscando enlace {newA}↔{newB} en BD",flush=True)
             try:
-                conn2 = psycopg2.connect(
-                    dbname="geant_network",
-                    user="geant_user",
-                    password="geant",
-                    host="192.168.18.151",
-                    port="5432",
-                )
+                conn2 = psycopg2.connect(**DB_CONFIG)
                 cur2 = conn2.cursor()
                 cur2.execute("""
                     SELECT puerto_origen, puerto_destino, id_origen_switch, id_destino_switch
@@ -652,13 +798,7 @@ def delete_link():
             return jsonify({"error": "IDs deben ser enteros positivos"}), 400
 
         # 1) Leer de BD los puertos originales de A↔B
-        conn = psycopg2.connect(
-            dbname="geant_network",
-            user="geant_user",
-            password="geant",
-            host="192.168.18.151",
-            port="5432",
-        )
+        conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
         cur.execute("""
             SELECT puerto_origen, puerto_destino, id_origen_switch, id_destino_switch
@@ -679,7 +819,7 @@ def delete_link():
                 "message": f"No había enlace físico A={A}↔B={B} en BD. Intentando eliminar patch."
             }), 200
 
-        # ✅ Desempaquetar correctamente
+        # Desempaquetar correctamente
         puerto_origen_old, puerto_destino_old, id_origen_real, id_destino_real = row
 
         if puerto_origen_old is None or puerto_destino_old is None:
