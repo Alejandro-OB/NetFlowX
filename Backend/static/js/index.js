@@ -10,6 +10,7 @@ const MININET_AGENT_URL = 'http://192.168.18.209:5002';  // ya no se usa en este
 //  (Se reutiliza la misma de topology.js si ambos archivos están cargados.)
 // ==============================
 function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
+  console.log('showMessageModal:', title, message, isConfirm, onConfirm);
   const modal       = document.getElementById('message-modal');
   const titleElem   = document.getElementById('message-modal-title');
   const contentElem = document.getElementById('message-modal-content');

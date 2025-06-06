@@ -113,33 +113,8 @@ button:disabled {
   margin: 0 auto;
 }
 
-/* Modales */
-#message-modal, #modal-selector-servidor-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  justify-content: center;
-  align-items: center;
-  z-index: 50;
-}
 
-#message-modal .bg-white, #modal-selector-servidor {
-  max-width: 500px;
-  width: 100%;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-}
 
-#message-modal button, #modal-selector-servidor button {
-  padding: 10px 20px;
-  margin: 10px;
-}
-
-#message-modal .bg-white {
-  max-width: 400px;
-}
 
 /* Estilo para la lista de eventos */
 /* Contenedor de la lista de eventos */

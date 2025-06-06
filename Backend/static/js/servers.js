@@ -109,10 +109,9 @@ async function handleRemoveServer(event) {
     const hostName = event.target.dataset.hostName;
     const host = window.hostData?.find(h => h.name === hostName);
 
-    // 🔍 Obtener IP multicast correspondiente al host desde la lista activa
     const serverData = window.servidoresActivosData?.find(s => s.host_name === hostName);
     const ipMulticast = serverData?.ip_destino;
-
+    console.log("entrando a eliminar servidor", hostName, ipMulticast);
     showMessageModal(
         'Confirmar Eliminación',
         `¿Estás seguro de que quieres eliminar el servidor ${hostName}? Esto detendrá el streaming de video en ese host.`,
@@ -131,13 +130,13 @@ async function handleRemoveServer(event) {
                 const data = await response.json();
 
                 if (response.ok) {
-                    await loadActiveClientsFromDB();        // actualiza array + tabla
-                    await loadMininetHosts();               // actualiza lista de clientes disponibles
+                    await loadActiveClientsFromDB();        
+                    await loadMininetHosts();               
                     await actualizarIconosDeHosts?.();  
-                    deseleccionarHost?.(host);              // actualiza íconos de topología
-                    await updateActiveClientsTable();       // fuerza recarga visual en la tabla
-                    await updateDashboard?.();              // actualiza resumen en dashboard
-                    await loadActiveServers?.();            // actualiza la lista de servidores
+                    deseleccionarHost?.(host);              
+                    await updateActiveClientsTable();       
+                    await updateDashboard?.();              
+                    await loadActiveServers?.();            
                     await loadTopology?.();  
                     cargarEstadisticas();               // recarga visual de topología
 
@@ -316,7 +315,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const esCliente = window.activeFFplayClients?.some(c => c.host === host.name);
 
     if (esCliente) {
-      // ✅ Llamar a la función que detiene realmente al cliente
       if (typeof stopFFmpegClient === 'function') {
         await stopFFmpegClient(host.name);
         loadActiveClientsFromDB?.();
