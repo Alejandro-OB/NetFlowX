@@ -244,7 +244,7 @@ def calculate_shortest_path(start_dpid, end_dpid):
 
 
 @dijkstra_bp.route('/calculate_path', methods=['POST'])
-def calculate_path_endpoint():
+def calculate_path():
     """
     Espera JSON:
       { "src_mac": "AA:BB:CC:DD:EE:FF", "dst_mac": "11:22:33:44:55:66" }
@@ -294,7 +294,7 @@ def calculate_path_endpoint():
             print(f"[ERROR] Error al leer configuracion: {e}")
         finally:
             conn.close()
-    print(f"Usando algoritmo de enrutamiento: {algoritmo}")
+    #print(f"Usando algoritmo de enrutamiento: {algoritmo}")
     # 2) Calcular ruta según algoritmo
     if algoritmo == 'shortest_path':
         raw_path = calculate_shortest_path(src_dpid, dst_dpid)
@@ -408,7 +408,33 @@ def save_route():
     host_origen = data.get('host_origen')
     host_destino = data.get('host_destino')
     ruta = data.get('ruta')
-    print(f"Datos recibidos: {data}")
+    #print(f"Datos recibidos: {data}")
+
+    algoritmo = 'dijkstra'
+    conn = _get_db_connection()
+    if conn:
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute(
+                "SELECT algoritmo_enrutamiento "
+                "FROM configuracion "
+                "ORDER BY fecha_activacion DESC "
+                "LIMIT 1"
+            )
+            row = cur.fetchone()
+            if row:
+                alg = row['algoritmo_enrutamiento']
+                if alg in ['dijkstra', 'shortest_path']:
+                    algoritmo = alg
+                else:
+                    print(
+                        f"[WARNING] Algoritmo desconocido en configuracion: {alg}. Usando 'dijkstra'."
+                    )
+            cur.close()
+        except Exception as e:
+            print(f"[ERROR] Error al leer configuracion: {e}")
+        finally:
+            conn.close()
     if not all([host_origen, host_destino, ruta]):
         return jsonify({"error": "Faltan parámetros: host_origen, host_destino, ruta"}), 400
 
@@ -440,8 +466,8 @@ def save_route():
 
         # Insertar la ruta en la tabla rutas_ping
         cur.execute(
-            "INSERT INTO rutas_ping (host_origen, host_destino, descripcion) VALUES (%s, %s, %s) RETURNING id_ruta;",
-            (origen_id, destino_id, ruta)
+            "INSERT INTO rutas_ping (host_origen, host_destino, descripcion, algoritmo_enrutamiento) VALUES (%s, %s, %s, %s) RETURNING id_ruta;",
+            (origen_id, destino_id, ruta, algoritmo)
         )
         id_ruta = cur.fetchone()[0]
         conn.commit()
@@ -455,9 +481,4 @@ def save_route():
         logger.error(f"Error al guardar la ruta: {e}")
         return jsonify({"error": f"Error al guardar la ruta: {e}"}), 500
 
-
-
-
-
-# Cargar la topología al iniciar
 load_topology()

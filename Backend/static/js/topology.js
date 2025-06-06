@@ -266,13 +266,10 @@ function iniciarPing() {
 function mostrarPingStream(hostOrigenObj, hostDestinoObj) {
   const origenName = hostOrigenObj.name;
   const destinoName = hostDestinoObj.name;
-  const origenIp = hostOrigenObj.ip;
   const destinoIp = hostDestinoObj.ip;
   const origenMac = hostOrigenObj.mac;
   const destinoMac = hostDestinoObj.mac;
-  const origenIdSwitch = hostOrigenObj.id_switch;
-  const destinoIdSwitch = hostDestinoObj.id_switch;
-  console.log(`Iniciando ping desde ${origenName} (${origenIp}, ${origenMac}) a ${destinoIp} (${destinoMac})`);
+
   const output = document.getElementById('ping-output');
   output.textContent += `Conectando SSE para ping...\n`;
 
@@ -307,9 +304,9 @@ function mostrarPingStream(hostOrigenObj, hostDestinoObj) {
 //  Llama a Dijkstra (Flask) y dibuja la ruta
 // ===============================================
 async function obtenerYMostrarRuta(origenMac, destinoMac, origenHostName, destinoHostName) {
-  console.log(`Obteniendo ruta de Dijkstra de ${origenMac} (${origenHostName}) a ${destinoMac} (${destinoHostName})`);
+  //console.log(`Obteniendo ruta de Dijkstra de ${origenMac} (${origenHostName}) a ${destinoMac} (${destinoHostName})`);
   const output = document.getElementById('ping-output');
-  output.textContent += '\nCalculando ruta con Dijkstra...\n';
+  //output.textContent += '\nCalculando ruta con Dijkstra...\n';
 
   try {
     // 1) POST a /dijkstra/calculate_path para obtener la ruta
@@ -339,9 +336,6 @@ async function obtenerYMostrarRuta(origenMac, destinoMac, origenHostName, destin
     }
     const topoData = await topoRes.json();
     const allSwitchesData = Array.isArray(topoData.switches) ? topoData.switches : [];
-
-    // 3) Obtener los nombres de los hosts asociados a los switches
-
 
     // 4) Dibujar ruta en el mapa
     dibujarRutaEnMapa(pathArr, allSwitchesData);

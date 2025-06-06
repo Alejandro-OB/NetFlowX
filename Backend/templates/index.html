@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="stylesheet" href="../static/css/custom-styles.css">
+  <link rel="stylesheet" href="../static/css/stats.css">
   <link rel="icon" href="static/images/LOGO2.png" sizes="180x180" type="image/png">
 </head>
 <body class="bg-gray-50 h-screen">
@@ -333,7 +334,10 @@
           <p>Grupos multicast: <span id="total-grupos">0</span></p>
         </div>
 
-        <div id="grafico-clientes" class="grafico-clientes"></div>
+        <div class="grafico-clientes">
+           <h2 class="text-2xl font-semibold text-gray-800 mb-4">Clientes Asociados a Servidores Activos</h2>
+            <canvas id="grafico-clientes"></canvas>
+        </div>
 
         <table>
           <thead>
@@ -343,11 +347,36 @@
         </table>
 
         <div class="mt-8">
+          <h3 class="text-xl font-semibold text-gray-700 mb-3">Enrutamiento</h3>
+          <table id="tabla-estadisticas" class="tabla-stats">
+            <thead>
+              <tr>
+                <th>Host Origen</th>
+                <th>Host Destino</th>
+                <th>Ruta</th>
+                <th>Algoritmo</th>
+                <th>RTT (ms)</th>
+                <th>Jitter (ms)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="6" class="text-center py-4 text-gray-500">Cargando estadísticas...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mt-8">
+          <h2 class="text-xl font-semibold text-gray-700 mb-3">Comparación de Algoritmos: Dijkstra vs Shortest Path</h2>
+          <div class="relative">
+            <canvas id="comparacionAlgoritmosChart"></canvas>
+          </div>
+        </div>
+
+        <div class="mt-8">
           <h3 class="text-xl font-semibold text-gray-700 mb-3">Últimos eventos</h3>
           <ul id="lista-eventos" class="list-disc list-inside text-gray-600 space-y-1"></ul>
         </div>
-        <table id="tabla-estadisticas" class="tabla-stats"></table>
-        <button onclick="cargarEstadisticasConRutas()">Actualizar estadísticas</button>
+        
       </div>
 
     </section>
@@ -407,6 +436,8 @@
   <script src="../static/js/clients.js"></script>
   <script src="../static/js/topology.js"></script>
   <script src="../static/js/stats.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 
 </body>
 </html>
