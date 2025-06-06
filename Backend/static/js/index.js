@@ -1,10 +1,9 @@
 // --- index.js ---
-
 // ==============================
 //  Constantes Globales
 // ==============================
 const API_BASE_URL      = 'http://192.168.18.151:5000';
-const MININET_AGENT_URL = 'http://192.168.18.208:5002';  // ya no se usa en este archivo
+const MININET_AGENT_URL = 'http://192.168.18.209:5002';  // ya no se usa en este archivo
 
 // ==============================
 //  Función auxiliar para mostrar modales

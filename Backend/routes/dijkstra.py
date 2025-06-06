@@ -242,6 +242,7 @@ def calculate_shortest_path(start_dpid, end_dpid):
     return None
 
 
+
 @dijkstra_bp.route('/calculate_path', methods=['POST'])
 def calculate_path_endpoint():
     """
@@ -398,6 +399,62 @@ def calculate_multicast_tree():
         serialized_tree[leaf_str] = [port_cliente]
 
     return jsonify({"tree": serialized_tree}), 200
+
+
+
+@dijkstra_bp.route('/save_route', methods=['POST'])
+def save_route():
+    data = request.get_json()
+    host_origen = data.get('host_origen')
+    host_destino = data.get('host_destino')
+    ruta = data.get('ruta')
+    print(f"Datos recibidos: {data}")
+    if not all([host_origen, host_destino, ruta]):
+        return jsonify({"error": "Faltan parámetros: host_origen, host_destino, ruta"}), 400
+
+    try:
+        # Verificar que los valores de host_origen y host_destino sean correctos
+        logger.info(f"Guardando ruta entre {host_origen} y {host_destino}")
+
+        # Obtener el ID de los hosts en la base de datos por nombre
+        conn = _get_db_connection()
+        cur = conn.cursor()
+
+        # Consultar el ID del host de origen
+        logger.info(f"Consultando ID para el host de origen: {host_origen}")
+        cur.execute("SELECT id_host FROM hosts WHERE nombre = %s;", (host_origen,))
+        origen_id = cur.fetchone()
+        if not origen_id:
+            return jsonify({"error": f"No se encontró el host de origen: {host_origen}"}), 404
+        origen_id = origen_id[0]
+        logger.info(f"ID de origen: {origen_id}")
+
+        # Consultar el ID del host de destino
+        logger.info(f"Consultando ID para el host de destino: {host_destino}")
+        cur.execute("SELECT id_host FROM hosts WHERE nombre = %s;", (host_destino,))
+        destino_id = cur.fetchone()
+        if not destino_id:
+            return jsonify({"error": f"No se encontró el host de destino: {host_destino}"}), 404
+        destino_id = destino_id[0]
+        logger.info(f"ID de destino: {destino_id}")
+
+        # Insertar la ruta en la tabla rutas_ping
+        cur.execute(
+            "INSERT INTO rutas_ping (host_origen, host_destino, descripcion) VALUES (%s, %s, %s) RETURNING id_ruta;",
+            (origen_id, destino_id, ruta)
+        )
+        id_ruta = cur.fetchone()[0]
+        conn.commit()
+
+        cur.close()
+        conn.close()
+
+        return jsonify({"success": True, "message": f"Ruta guardada con ID {id_ruta}"}), 200
+
+    except Exception as e:
+        logger.error(f"Error al guardar la ruta: {e}")
+        return jsonify({"error": f"Error al guardar la ruta: {e}"}), 500
+
 
 
 

@@ -254,7 +254,7 @@ function iniciarPing() {
 
   const host1 = selectedHosts[0];
   const host2 = selectedHosts[1];
-
+  console.log("Iniciando ping entre:", host1.name, "y", host2.name);
   const output = document.getElementById('ping-output');
   if (output) {
     output.textContent = `Iniciando ping de ${host1.name} (${host1.ip}) a ${host2.ip}...\n`;
@@ -264,17 +264,19 @@ function iniciarPing() {
 }
 
 function mostrarPingStream(hostOrigenObj, hostDestinoObj) {
-  const origenName     = hostOrigenObj.name;
-  const origenIp       = hostOrigenObj.ip;
-  const destinoIp      = hostDestinoObj.ip;
-  const origenMac      = hostOrigenObj.mac;
-  const destinoMac     = hostDestinoObj.mac;
+  const origenName = hostOrigenObj.name;
+  const destinoName = hostDestinoObj.name;
+  const origenIp = hostOrigenObj.ip;
+  const destinoIp = hostDestinoObj.ip;
+  const origenMac = hostOrigenObj.mac;
+  const destinoMac = hostDestinoObj.mac;
   const origenIdSwitch = hostOrigenObj.id_switch;
-  const destinoIdSwitch= hostDestinoObj.id_switch;
-
+  const destinoIdSwitch = hostDestinoObj.id_switch;
+  console.log(`Iniciando ping desde ${origenName} (${origenIp}, ${origenMac}) a ${destinoIp} (${destinoMac})`);
   const output = document.getElementById('ping-output');
   output.textContent += `Conectando SSE para ping...\n`;
 
+  obtenerYMostrarRuta(origenMac, destinoMac, origenName, destinoName);
   // SSE: ping entre hosts en Mininet
   const url = `${MININET_AGENT_URL}/mininet/ping_between_hosts_stream?origen=${encodeURIComponent(origenName)}&destino=${encodeURIComponent(destinoIp)}`;
   const eventSource = new EventSource(url);
@@ -289,26 +291,28 @@ function mostrarPingStream(hostOrigenObj, hostDestinoObj) {
 
     if (event.data.includes('Fin del ping') || event.data.includes('error de conexión')) {
       eventSource.close();
-      obtenerYMostrarRuta(origenMac, destinoMac, origenIdSwitch, destinoIdSwitch);
+      
     }
   };
 
   eventSource.onerror = () => {
     output.textContent += '\n[Fin del ping o error de conexión]\n';
     eventSource.close();
-    obtenerYMostrarRuta(origenMac, destinoMac, origenIdSwitch, destinoIdSwitch);
+    //obtenerYMostrarRuta(origenMac, destinoMac, origenName, destinoName);
   };
 }
+
 
 // ===============================================
 //  Llama a Dijkstra (Flask) y dibuja la ruta
 // ===============================================
-async function obtenerYMostrarRuta(origenMac, destinoMac, origenIdSwitch, destinoIdSwitch) {
+async function obtenerYMostrarRuta(origenMac, destinoMac, origenHostName, destinoHostName) {
+  console.log(`Obteniendo ruta de Dijkstra de ${origenMac} (${origenHostName}) a ${destinoMac} (${destinoHostName})`);
   const output = document.getElementById('ping-output');
   output.textContent += '\nCalculando ruta con Dijkstra...\n';
 
   try {
-    // 1) POST a /dijkstra/calculate_path
+    // 1) POST a /dijkstra/calculate_path para obtener la ruta
     const pathRes = await fetch(`${API_BASE_URL}/dijkstra/calculate_path`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -324,8 +328,9 @@ async function obtenerYMostrarRuta(origenMac, destinoMac, origenIdSwitch, destin
 
     const pathData = await pathRes.json();
     const pathArr = pathData.path; // [{ dpid: <int>, out_port: <int>, in_port: <int|null> }, ...]
-    output.textContent += `Ruta recibida: ${JSON.stringify(pathArr)}\n`;
-    console.log("Ruta calculada (pathArr):", pathArr);
+    
+    //output.textContent += `Ruta recibida: ${JSON.stringify(pathArr)}\n`;
+    //console.log("Ruta calculada (pathArr):", pathArr);
 
     // 2) Obtener topología actual (solo para coordenadas)
     const topoRes = await fetch(`${API_BASE_URL}/topology/get`);
@@ -335,14 +340,53 @@ async function obtenerYMostrarRuta(origenMac, destinoMac, origenIdSwitch, destin
     const topoData = await topoRes.json();
     const allSwitchesData = Array.isArray(topoData.switches) ? topoData.switches : [];
 
-    // 3) Dibujar ruta en el mapa
+    // 3) Obtener los nombres de los hosts asociados a los switches
+
+
+    // 4) Dibujar ruta en el mapa
     dibujarRutaEnMapa(pathArr, allSwitchesData);
+
+    // 5) Guardar la ruta en la base de datos
+    await guardarRutaEnBaseDeDatos(pathArr, origenHostName, destinoHostName);
 
   } catch (err) {
     output.textContent += `Error: ${err.message}\n`;
     console.error("Error en obtenerYMostrarRuta:", err);
   }
 }
+
+// Función para guardar la ruta en la base de datos
+async function guardarRutaEnBaseDeDatos(pathArr, origenName, destinoName) {
+  const output = document.getElementById('ping-output');
+  output.textContent += '\nGuardando ruta en la base de datos...\n';
+  console.log("Guardando ruta:", pathArr, "de", origenName, "a", destinoName);
+  // Crear la cadena con los dpids de la ruta (por ejemplo, 's1-s2-s3-s4')
+  const dpidRoute = pathArr.map(item => item.dpid).join('-');
+
+  try {
+    // Realizar la solicitud para guardar la ruta en la base de datos
+    const response = await fetch(`${API_BASE_URL}/dijkstra/save_route`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        host_origen: origenName,  // Enviar el nombre del host de origen
+        host_destino: destinoName, // Enviar el nombre del host de destino
+        ruta: dpidRoute          // Enviar la ruta en formato 's1-s2-s3...'
+      })
+    });
+
+    const data = await response.json();
+    if (data.success) {
+      output.textContent += `Ruta guardada exitosamente: ${dpidRoute}\n`;
+    } else {
+      output.textContent += `Error al guardar la ruta: ${data.error}\n`;
+    }
+  } catch (err) {
+    output.textContent += `Error al hacer la solicitud para guardar la ruta: ${err.message}\n`;
+    console.error("Error al guardar la ruta:", err);
+  }
+}
+
 
 // ==================================================
 //  Dibuja la ruta en el mapa usando id_switch directo
