@@ -11,15 +11,11 @@ from flask_cors import CORS # Importar CORS
 import psycopg2
 
 app = Flask(__name__)
-CORS(app) # Habilitar CORS para toda la aplicación Flask del agente
+CORS(app) 
 
-
-# Diccionario para almacenar los procesos de video (FFmpeg) activos en el agente (para servidores)
-# Formato: { "h1_1": {"pid": ffmpeg_pid, "host_pid": mininet_host_pid_on_agent_machine} }
 ffmpeg_server_processes = {}
 
-# Diccionario para almacenar los procesos de FFplay (cliente) activos en el agente
-# Formato: { "h1_1": {"pid": ffplay_client_pid, "host_pid": mininet_host_pid_on_agent_machine} }
+
 ffplay_client_processes = {}
 
 DB_CONFIG = {
@@ -42,15 +38,10 @@ def limpiar_servidores_activos():
     except Exception as e:
         print(f"Agente: Error al limpiar tabla servidores_vlc_activos: {e}")
 
-#limpiar_servidores_activos() 
 
 def get_host_pid(hostname):
-    """
-    Obtiene el PID del proceso de Mininet asociado a un hostname específico.
-    Este PID es el del proceso 'mnexec' que ejecuta el shell del host.
-    """
+
     try:
-        # Busca el PID del proceso 'mininet:<hostname>'
         result = subprocess.run(['pgrep', '-f', f'mininet:{hostname}'], capture_output=True, text=True, check=True)
         pid = result.stdout.strip().split('\n')[0]
         return int(pid)
@@ -59,24 +50,17 @@ def get_host_pid(hostname):
         return None
 
 def kill_media_processes_on_host(hostname, host_pid, process_type="any", specific_pid=None):
-    """
-    Mata procesos de FFmpeg o FFplay que se estén ejecutando dentro del contexto
-    de un host de Mininet específico.
-    Si se proporciona specific_pid, mata solo ese PID. De lo contrario, mata todos los de ese tipo.
-    'process_type' puede ser "server" (ffmpeg), "client" (ffplay) o "any".
-    """
+
     if not host_pid:
         return
     
     if specific_pid:
-        # Matar un PID específico
         try:
             subprocess.run(['mnexec', '-a', str(host_pid), 'kill', '-9', str(specific_pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print(f"Agente: Proceso PID {specific_pid} ({process_type}) limpiado en {hostname}.")
         except Exception as e:
             print(f"Agente: Error al limpiar proceso PID {specific_pid} ({process_type}) en {hostname}: {e}")
     else:
-        # Matar todos los procesos de un tipo (comportamiento anterior para limpieza general)
         try:
             process_name = 'ffmpeg'
             if process_type == "client":
@@ -92,32 +76,24 @@ def kill_media_processes_on_host(hostname, host_pid, process_type="any", specifi
 
 
 def cleanup_agent_processes():
-    """
-    Función de limpieza que se ejecuta al cerrar el agente.
-    Mata todos los procesos FFmpeg (servidor) y FFplay (cliente) iniciados por el agente.
-    """
+
     print("Agente: Realizando limpieza de procesos activos (FFmpeg servidor y FFplay cliente)...")
     for host, info in list(ffmpeg_server_processes.items()):
-        # Aquí se usa el comportamiento de matar todos los procesos de ese tipo
         kill_media_processes_on_host(host, info.get("host_pid"), "server")
         del ffmpeg_server_processes[host]
     
     for host, info in list(ffplay_client_processes.items()):
-        # Aquí se usa el comportamiento de matar todos los procesos de ese tipo
         kill_media_processes_on_host(host, info.get("host_pid"), "client")
         del ffplay_client_processes[host]
     print("Agente: Limpieza completada.")
 
-# Registrar la función de limpieza para que se ejecute al salir de la aplicación
 atexit.register(cleanup_agent_processes)
 
-# Manejar señales de terminación para asegurar la limpieza
 def signal_handler(signum, frame):
     print(f"Agente: Señal {signum} recibida. Iniciando limpieza y saliendo.")
     cleanup_agent_processes()
     sys.exit(0)
 
-# Registrar manejadores de señales para SIGTERM y SIGINT (Ctrl+C)
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
@@ -137,7 +113,6 @@ def start_ffmpeg_server_on_host():
     if not all([host, video_path, ip_multicast, puerto]):
         return jsonify({"error": "Faltan parámetros: host, video_path, ip_multicast, puerto"}), 400
     
-    # Validaciones básicas
     if not re.match(r'^[a-zA-Z0-9_-]+$', host):
         return jsonify({"error": "Parámetro 'host' inválido"}), 400
     if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip_multicast):
@@ -149,7 +124,6 @@ def start_ffmpeg_server_on_host():
     except ValueError:
         return jsonify({"error": "Parámetro 'puerto' inválido"}), 400
 
-    # Si ya hay un proceso de FFmpeg de servidor para este host, lo matamos primero
     if host in ffmpeg_server_processes:
         kill_media_processes_on_host(host, ffmpeg_server_processes[host].get("host_pid"), "server")
         del ffmpeg_server_processes[host]
@@ -159,7 +133,6 @@ def start_ffmpeg_server_on_host():
         return jsonify({"error": f"No se pudo encontrar el PID del host de Mininet: {host}"}), 500
 
     try:
-        # Comando FFmpeg para transmitir un video en bucle a una dirección multicast UDP
         process = subprocess.Popen(
             ['mnexec', '-a', str(pid_host), 'ffmpeg',
              '-stream_loop', '-1',               # Bucle infinito
@@ -176,9 +149,9 @@ def start_ffmpeg_server_on_host():
              f'udp://{ip_multicast}:{puerto}?ttl=1',  # Dirección de salida multicast
              '-loglevel', 'quiet']              # Silenciar la salida
             ,
-            stdout=subprocess.DEVNULL, # Redirigir stdout a /dev/null
-            stderr=subprocess.DEVNULL, # Redirigir stderr a /dev/null
-            preexec_fn=os.setsid # Desvincular el proceso hijo del padre
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, 
+            preexec_fn=os.setsid 
         )
         ffmpeg_server_processes[host] = {"pid": process.pid, "host_pid": pid_host}
         print(f"Agente: Transmisión FFmpeg iniciada para {host} a {ip_multicast}:{puerto}. PID: {process.pid}")
@@ -189,10 +162,7 @@ def start_ffmpeg_server_on_host():
 
 @app.route('/mininet/stop_ffmpeg_server', methods=['POST'])
 def stop_ffmpeg_server_on_host():
-    """
-    Detiene el proceso FFmpeg que se esté ejecutando en un host de Mininet (lado del servidor).
-    Espera JSON con: host, ip_multicast.
-    """
+
     data = request.get_json()
     host = data.get('host')
     ip_multicast = data.get('ip_multicast')
@@ -220,14 +190,9 @@ def stop_ffmpeg_server_on_host():
     return jsonify({"success": True, "message": f"FFmpeg servidor detenido en {host} ({ip_multicast})"}), 200
 
 
-# --- Nuevas rutas para el cliente FFplay ---
-
 @app.route('/mininet/start_ffmpeg_client', methods=['POST'])
-def start_ffmpeg_client_on_host(): # Mantengo el nombre de la ruta para compatibilidad con clients.js
-    """
-    Inicia un cliente FFplay en un host de Mininet para recibir y reproducir un stream multicast.
-    Espera JSON con: host, multicast_ip, puerto.
-    """
+def start_ffmpeg_client_on_host(): 
+
     data = request.get_json()
     host = data.get('host')
     multicast_ip = data.get('multicast_ip')
@@ -236,7 +201,6 @@ def start_ffmpeg_client_on_host(): # Mantengo el nombre de la ruta para compatib
     if not all([host, multicast_ip, puerto]):
         return jsonify({"error": "Faltan parámetros: host, multicast_ip, puerto"}), 400
     
-    # Validaciones básicas
     if not re.match(r'^[a-zA-Z0-9_-]+$', host):
         return jsonify({"error": "Parámetro 'host' inválido"}), 400
     if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', multicast_ip):
@@ -248,9 +212,7 @@ def start_ffmpeg_client_on_host(): # Mantengo el nombre de la ruta para compatib
     except ValueError:
         return jsonify({"error": "Parámetro 'puerto' inválido"}), 400
 
-    # Si ya hay un proceso de FFplay cliente para este host, lo matamos primero
     if host in ffplay_client_processes:
-        # Aquí matamos el proceso específico que ya estaba registrado para este host
         kill_media_processes_on_host(host, ffplay_client_processes[host].get("host_pid"), "client", specific_pid=ffplay_client_processes[host].get("pid"))
         del ffplay_client_processes[host]
 
@@ -259,7 +221,6 @@ def start_ffmpeg_client_on_host(): # Mantengo el nombre de la ruta para compatib
         return jsonify({"error": f"No se pudo encontrar el PID del host de Mininet: {host}"}), 500
 
     try:
-        # Comando FFplay para recibir un stream multicast UDP y reproducirlo
         process = subprocess.Popen(
             ['mnexec', '-a', str(pid_host), 'ffplay',
             '-x', '320', '-y', '240', 
@@ -278,12 +239,9 @@ def start_ffmpeg_client_on_host(): # Mantengo el nombre de la ruta para compatib
         print(f"Agente: Error al iniciar FFplay cliente en {host}: {e}")
         return jsonify({"error": f"Error al iniciar FFplay cliente: {e}"}), 500
 
-@app.route('/mininet/stop_ffmpeg_client', methods=['POST']) # Mantengo el nombre de la ruta para compatibilidad con clients.js
+@app.route('/mininet/stop_ffmpeg_client', methods=['POST']) 
 def stop_ffmpeg_client_on_host():
-    """
-    Detiene el proceso FFplay (cliente) que se esté ejecutando en un host de Mininet.
-    Espera JSON con: host.
-    """
+
     data = request.get_json()
     host = data.get('host')
 
@@ -292,14 +250,12 @@ def stop_ffmpeg_client_on_host():
 
     if host not in ffplay_client_processes:
         print(f"Agente: No se encontró proceso FFplay cliente activo para {host} en el registro. Intentando limpieza general.")
-        # Si no está en nuestro registro, intentamos una limpieza general por si acaso
         pid_host = get_host_pid(host)
         if pid_host:
             kill_media_processes_on_host(host, pid_host, "client")
         return jsonify({"success": True, "message": f"No se encontró FFplay cliente activo para {host} en el registro, se intentó detener cualquier proceso."}), 200
 
 
-    # Obtener el PID específico del proceso FFplay que iniciamos para este host
     specific_ffplay_pid = ffplay_client_processes[host].get("pid")
     host_pid_for_client = ffplay_client_processes[host].get("host_pid")
 
@@ -336,7 +292,7 @@ def ping_between_hosts():
 
             for line in iter(process.stdout.readline, ''):
                 yield f"data: {line.strip()}\n\n"
-                time.sleep(0.2)  # pequeño retraso para dar efecto de consola
+                time.sleep(0.2)  
 
             process.stdout.close()
             process.wait()
@@ -346,22 +302,17 @@ def ping_between_hosts():
     return Response(generate(), mimetype='text/event-stream')
 
 def get_host_db_info(identifier):
-    """
-    Obtiene la información (id_host, nombre, ipv4) de un host
-    dado su nombre o su dirección IPv4.
-    """
+
     conn = None
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
 
-        # Intentar encontrar por nombre (columna 'nombre')
         cur.execute("SELECT id_host, nombre, ipv4 FROM hosts WHERE nombre = %s;", (identifier,))
         result = cur.fetchone()
         if result:
             return {"id_host": result[0], "nombre": result[1], "ipv4": result[2]}
 
-        # Si no se encuentra por nombre, intentar por IPv4 (columna 'ipv4')
         cur.execute("SELECT id_host, nombre, ipv4 FROM hosts WHERE ipv4 = %s;", (identifier,))
         result = cur.fetchone()
         if result:
@@ -377,25 +328,23 @@ def get_host_db_info(identifier):
 
 def parse_ping_output(ping_output):
 
-    # Usamos una expresión regular para extraer la latencia y el jitter
     rtt_match = re.search(r'rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/([\d.]+) ms', ping_output)
     
     if rtt_match:
-        avg_rtt = float(rtt_match.group(1))  # Extraemos el valor de la latencia promedio (avg)
-        jitter = float(rtt_match.group(2))   # Extraemos el valor de jitter (mdev)
+        avg_rtt = float(rtt_match.group(1)) 
+        jitter = float(rtt_match.group(2))   
         return avg_rtt, jitter
 
-    return None, None  # Si no se encuentra, retornamos None para ambos valores
+    return None, None  
 
 
 
 @app.route('/mininet/ping_between_hosts_stream', methods=['GET'])
 def ping_between_hosts_stream():
-    data = request.args  # Obtener parámetros de la URL (query string)
+    data = request.args  
     origen_identifier = data.get('origen')
     destino_identifier = data.get('destino')
 
-    # Asegúrate de que los parámetros se conviertan a tipos correctos, con valores por defecto
     try:
         ping_count = int(data.get('count', 1))
         interval = float(data.get('interval', 1))
@@ -405,7 +354,6 @@ def ping_between_hosts_stream():
     if not origen_identifier or not destino_identifier:
         return Response("data: ERROR: Parámetros 'origen' y 'destino' son requeridos.\n\n", mimetype='text/event-stream'), 400
 
-    # Usa la función get_host_db_info para obtener la información completa del host
     origen_info = get_host_db_info(origen_identifier)
     destino_info = get_host_db_info(destino_identifier)
 
@@ -416,7 +364,6 @@ def ping_between_hosts_stream():
         print(f"Agente: No se encontró información para el host de destino: {destino_identifier}")
         return Response(f"data: ERROR: No se encontró información para el host de destino: {destino_identifier}\n\n", mimetype='text/event-stream'), 404
 
-    # Ahora utilizamos los ID de los hosts para la consulta en la base de datos
     id_origen = origen_info["id_host"]
     id_destino = destino_info["id_host"]
     nombre_origen = origen_info["nombre"]
@@ -432,24 +379,21 @@ def ping_between_hosts_stream():
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
             time.sleep(2)
-            # Usamos los ID de los hosts para buscar la ruta en la base de datos
             cur.execute(
                 "SELECT id_ruta FROM rutas_ping WHERE host_origen = %s AND host_destino = %s "
                 "ORDER BY timestamp DESC LIMIT 1;",
-                (id_origen, id_destino)  # Usamos los ID en vez de los nombres
+                (id_origen, id_destino)  
             )
             ruta_result = cur.fetchone()
 
             if ruta_result:
                 id_ruta = ruta_result[0]
             else:
-                # Si no se encuentra la ruta, podemos manejarlo como un error
                 raise ValueError(f"No se encontró la ruta entre los hosts {id_origen} y {id_destino} en la tabla rutas_ping.")
 
-            # Insertar registro inicial en la tabla de latencia, ahora con id_ruta
             cur.execute(
                 "INSERT INTO latencias (host_origen, host_destino, timestamp, id_ruta) VALUES (%s, %s, NOW(), %s) RETURNING id_latencia;",
-                (nombre_origen, nombre_destino, id_ruta)  # Utilizamos los nombres de los hosts
+                (nombre_origen, nombre_destino, id_ruta)  
             )
             id_latencia = cur.fetchone()[0]
             conn.commit()
@@ -460,39 +404,35 @@ def ping_between_hosts_stream():
                 yield "data: ERROR: No se encontró PID para el host origen.\n\n"
                 return
 
-            # Comando ping dentro del ambiente Mininet
             ping_command = ['mnexec', '-a', str(pid_origen), 'ping', '-c', '3', ping_target_ip]
             yield f"data: Ejecutando Ping entre {nombre_origen} y {nombre_destino}\n\n"
 
             ping_process = subprocess.Popen(
                 ping_command,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Dirigir stderr a stdout para capturar todos los mensajes
+                stderr=subprocess.STDOUT,  
                 text=True
             )
 
             full_output_lines = []
-            # Leer y enviar la salida línea por línea
             for line in iter(ping_process.stdout.readline, ''):
                 full_output_lines.append(line)
-                yield f"data: {line.strip()}\n\n"  # Enviar cada línea de la salida del ping
+                yield f"data: {line.strip()}\n\n"  
 
             ping_process.stdout.close()
-            return_code = ping_process.wait(timeout=(ping_count * interval * 2 + 5))  # Esperar a que el proceso termine
+            return_code = ping_process.wait(timeout=(ping_count * interval * 2 + 5))  
 
             stdout_str = "".join(full_output_lines)
 
             if return_code == 0:
-                # Parsear la salida para obtener el promedio de latencia y jitter
                 latency_match = re.search(r"rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/([\d.]+) ms", stdout_str)
                 if latency_match:
                     avg_latency = float(latency_match.group(1))
-                    jitter = float(latency_match.group(2))  # mdev es usado como jitter
+                    jitter = float(latency_match.group(2))  
 
-                    # Actualizar la base de datos con la latencia, jitter y id_ruta en la tabla 'latencias'
                     cur.execute(
                         "UPDATE latencias SET rtt_ms = %s, jitter_ms = %s WHERE id_latencia = %s;",
-                        (avg_latency, jitter, id_latencia)  # Solo insertamos jitter y rtt
+                        (avg_latency, jitter, id_latencia)  
                     )
                     conn.commit()
                     yield f"data: --- FIN DE PING ---\n\n"
@@ -511,12 +451,12 @@ def ping_between_hosts_stream():
         except subprocess.TimeoutExpired:
             if ping_process:
                 ping_process.kill()
-                ping_process.communicate()  # Asegurar que las tuberías se vacíen después de matar
+                ping_process.communicate()  
             error_message = "El comando ping excedió el tiempo de espera."
             if conn and cur and id_latencia:
                 cur.execute(
                     "UPDATE latencias SET exit_code = %s WHERE id_latencia = %s;",
-                    (124, error_message, id_latencia)  # 124 es un código común para timeout en shells
+                    (124, error_message, id_latencia)  
                 )
                 conn.commit()
             yield f"data: ERROR: {error_message}\n\n"
@@ -524,7 +464,7 @@ def ping_between_hosts_stream():
         except Exception as e:
             error_message = f"Error interno en el agente al ejecutar ping: {e}"
             import traceback
-            traceback.print_exc()  # Imprimir el traceback completo para depuración
+            traceback.print_exc()  
             if conn and cur and id_latencia:
                 cur.execute(
                     "UPDATE latencias SET error_message = %s WHERE id_latencia = %s;",
@@ -537,7 +477,6 @@ def ping_between_hosts_stream():
             if conn:
                 conn.close()
 
-    # Devolver la respuesta como un Server-Sent Event stream
     return Response(generate_ping_stream(), mimetype='text/event-stream')
 
 
@@ -548,7 +487,6 @@ def crear_patch(id_origen, id_destino, bw_mbps, puerto_origen, puerto_destino):
     ifaceB = f"patch-{id_destino}-{id_origen}"
     warning_msgs = []
 
-    # 1) Crear patch en A
     try:
         subprocess.run([
             "ovs-vsctl", "add-port", swA, ifaceA,
@@ -560,7 +498,6 @@ def crear_patch(id_origen, id_destino, bw_mbps, puerto_origen, puerto_destino):
     except subprocess.CalledProcessError as e:
         warning_msgs.append(f"Error creando patch en {swA}: {e.stderr.decode(errors='ignore') if e.stderr else str(e)}")
 
-    # 2) Crear patch en B
     try:
         subprocess.run([
             "ovs-vsctl", "add-port", swB, ifaceB,
@@ -574,7 +511,6 @@ def crear_patch(id_origen, id_destino, bw_mbps, puerto_origen, puerto_destino):
 
     time.sleep(0.5)
 
-    # 3) Leer los ofports asignados
     ports_reales = {}
     for iface in (ifaceA, ifaceB):
         try:
@@ -585,7 +521,6 @@ def crear_patch(id_origen, id_destino, bw_mbps, puerto_origen, puerto_destino):
         except Exception as e:
             raise RuntimeError(f"No se pudo obtener ofport para {iface}: {e}")
 
-    # 4) Aplicar TBF
     tc_errors = []
     for iface in (ifaceA, ifaceB):
         subprocess.run(["tc", "qdisc", "del", "dev", iface, "root"],
@@ -636,7 +571,6 @@ def add_link():
 
         puerto_origen, puerto_destino = row
 
-        # ✅ LLAMADA CORRECTA
         ports_reales, warnings_patch, tc_errors = crear_patch(
             id_origen, id_destino, bw_mbps,
             puerto_origen=puerto_origen,
@@ -677,7 +611,6 @@ def update_link():
         if oldA <= 0 or oldB <= 0 or newA <= 0 or newB <= 0 or bw <= 0:
             return jsonify({"error": "IDs y ancho de banda deben ser enteros positivos"}), 400
 
-        # === 1) ELIMINAR INTERFACES ANTIGUAS ===
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
         cur.execute("""
@@ -710,7 +643,6 @@ def update_link():
         ]:
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # === 2) CREAR NUEVO ENLACE CON REINTENTO DE CONSULTA ===
         row2 = None
         for intento in range(3):
             print(f"[AGENTE] Intento {intento+1}: buscando enlace {newA}↔{newB} en BD",flush=True)
@@ -782,10 +714,7 @@ def update_link():
 
 @app.route('/mininet/delete_link', methods=['POST'])
 def delete_link():
-    """
-    Elimina interfaces físicas y patch-ports entre dos switches.
-    JSON esperado: { "id_origen": <int>, "id_destino": <int> }
-    """
+
 
     import traceback  
 
@@ -797,7 +726,6 @@ def delete_link():
         if A <= 0 or B <= 0:
             return jsonify({"error": "IDs deben ser enteros positivos"}), 400
 
-        # Leer de BD los puertos originales de A↔B
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
         cur.execute("""
@@ -818,7 +746,6 @@ def delete_link():
                 "message": f"No había enlace físico A={A}↔B={B} en BD. Intentando eliminar patch."
             }), 200
 
-        # Desempaquetar correctamente
         puerto_origen_old, puerto_destino_old, id_origen_real, id_destino_real = row
 
         if puerto_origen_old is None or puerto_destino_old is None:
@@ -829,7 +756,6 @@ def delete_link():
         iface_physA = f"{swA}-eth{puerto_origen_old}"
         iface_physB = f"{swB}-eth{puerto_destino_old}"
 
-        # Eliminar las interfaces físicas (si existen)
         subprocess.run(
             ["ovs-vsctl", "del-port", swA, iface_physA],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -839,7 +765,6 @@ def delete_link():
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-        # Eliminar los patch-ports correspondientes
         patchAB = f"patch-{A}-{B}"
         patchBA = f"patch-{B}-{A}"
         subprocess.run(
@@ -862,10 +787,7 @@ def delete_link():
 
 @app.route('/mininet/status', methods=['GET'])
 def mininet_status():
-    """
-    Verifica si Mininet está en ejecución (procesos activos o switches definidos).
-    Devuelve: { "running": true/false }
-    """
+
     import subprocess
 
     def is_mininet_running():
