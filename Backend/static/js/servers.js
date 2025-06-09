@@ -138,7 +138,7 @@ async function handleRemoveServer(event) {
                     await updateDashboard?.();              
                     await loadActiveServers?.();            
                     await loadTopology?.();  
-                    cargarEstadisticas();               // recarga visual de topología
+                    cargarEstadisticas();               
 
                     showMessageModal('Éxito', data.message || 'Servidor eliminado.');
                 } else {
@@ -265,7 +265,6 @@ document.getElementById('btn-iniciar-servidor')?.addEventListener('click', async
   const esServidor = window.servidoresActivos?.includes(host.name);
 
   if (esServidor) {
-    // Reutilizar flujo completo de eliminación de servidor
     const fakeEvent = {
       target: {
         dataset: {
@@ -275,7 +274,7 @@ document.getElementById('btn-iniciar-servidor')?.addEventListener('click', async
     };
     await handleRemoveServer(fakeEvent);
   } else {
-    abrirModalSeleccionVideo(); // Iniciar
+    abrirModalSeleccionVideo(); 
   }
 });
 
@@ -295,13 +294,11 @@ document.getElementById('modal-selector-servidor-overlay')?.addEventListener('cl
 
 
 document.addEventListener('DOMContentLoaded', () => {
-  // 1. Carga inicial de datos
   loadActiveServers();
   verificarAlgoritmoBalanceo();
 
   if (typeof loadActiveClientsFromDB === 'function') {
     loadActiveClientsFromDB();
-    //setInterval(loadActiveClientsFromDB, 10000);
   }
 
   document.getElementById('btn-modal-launch-server')?.addEventListener('click', async () => {
@@ -320,12 +317,10 @@ document.addEventListener('DOMContentLoaded', () => {
         loadActiveClientsFromDB?.();
         updateDashboard?.();
         await actualizarIconosDeHosts?.();
-        //loadTopology?.();
       } else {
         showMessageModal('Error', 'No se encontró la función stopFFmpegClient');
       }
     } else {
-      // Iniciar cliente como antes
       try {
         const response = await fetch(`${API_BASE_URL}/client/get_multicast_stream_info`);
         const data = await response.json();
@@ -349,7 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
 
-  // 3. Cierre de modal con Escape o clic fuera
+  // Cierre de modal con Escape o clic fuera
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') cerrarModal();
   });
@@ -359,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!modalContent.contains(e.target)) cerrarModal();
   });
 
-  // 4. Actualización continua del estado de botones
+  // Actualización continua del estado de botones
   setInterval(() => {
     const btnPing = document.getElementById('btn-ping');
     const btnSrv = document.getElementById('btn-iniciar-servidor');
@@ -408,7 +403,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
     } else {
-      // 🔒 Si no hay host seleccionado, desactivar ambos botones
       btnSrv.disabled = true;
       btnSrv.textContent = 'Iniciar como Servidor';
       btnSrv.className = `${estiloAzul} ${estiloBase} ${estiloDeshabilitado}`;
@@ -422,7 +416,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-  // 5. Refresco automático de lista de servidores
   setInterval(() => {
     //loadActiveServers();
   }, 10000);

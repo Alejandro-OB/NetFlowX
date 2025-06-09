@@ -431,10 +431,11 @@ def ping_between_hosts_stream():
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
-            time.sleep(5)
+            time.sleep(2)
             # Usamos los ID de los hosts para buscar la ruta en la base de datos
             cur.execute(
-                "SELECT id_ruta FROM rutas_ping WHERE host_origen = %s AND host_destino = %s;",
+                "SELECT id_ruta FROM rutas_ping WHERE host_origen = %s AND host_destino = %s "
+                "ORDER BY timestamp DESC LIMIT 1;",
                 (id_origen, id_destino)  # Usamos los ID en vez de los nombres
             )
             ruta_result = cur.fetchone()
@@ -655,7 +656,7 @@ def add_link():
         return jsonify(response), 200
 
     except Exception as ex:
-        import traceback  # ✅ asegúrate de que esté definido
+        import traceback  
         traceback.print_exc()
         return jsonify({"error": f"Exception interna: {str(ex)}"}), 500
 
@@ -779,7 +780,6 @@ def update_link():
         return jsonify({"error": f"Exception interna: {str(ex)}"}), 500
 
 
-# --- NUEVO ENDPOINT: /mininet/delete_link ---
 @app.route('/mininet/delete_link', methods=['POST'])
 def delete_link():
     """
@@ -787,7 +787,7 @@ def delete_link():
     JSON esperado: { "id_origen": <int>, "id_destino": <int> }
     """
 
-    import traceback  # Asegúrate de tenerlo importado
+    import traceback  
 
     try:
         data = request.get_json() or {}
@@ -797,7 +797,7 @@ def delete_link():
         if A <= 0 or B <= 0:
             return jsonify({"error": "IDs deben ser enteros positivos"}), 400
 
-        # 1) Leer de BD los puertos originales de A↔B
+        # Leer de BD los puertos originales de A↔B
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
         cur.execute("""
@@ -813,7 +813,6 @@ def delete_link():
         conn.close()
 
         if row is None:
-            # Devolvemos éxito aunque no haya registro, para seguir limpieza de patch
             return jsonify({
                 "success": True,
                 "message": f"No había enlace físico A={A}↔B={B} en BD. Intentando eliminar patch."
@@ -830,7 +829,7 @@ def delete_link():
         iface_physA = f"{swA}-eth{puerto_origen_old}"
         iface_physB = f"{swB}-eth{puerto_destino_old}"
 
-        # 2) Eliminar las interfaces físicas (si existen)
+        # Eliminar las interfaces físicas (si existen)
         subprocess.run(
             ["ovs-vsctl", "del-port", swA, iface_physA],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -840,7 +839,7 @@ def delete_link():
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-        # 3) Eliminar los patch-ports correspondientes
+        # Eliminar los patch-ports correspondientes
         patchAB = f"patch-{A}-{B}"
         patchBA = f"patch-{B}-{A}"
         subprocess.run(
@@ -895,9 +894,7 @@ def mininet_status():
 
 
 if __name__ == '__main__':
-    # El agente debe ejecutarse en la máquina donde está Mininet,
-    # y debe ser accesible desde la máquina donde corre la aplicación Flask principal.
-    # Se recomienda ejecutarlo con un servidor WSGI como Gunicorn en producción.
-    print("Agente: Intentando iniciar el servidor Flask...") # Mensaje de depuración
-    app.run(host='0.0.0.0', port=5002, debug=True) # debug=True solo para desarrollo
-    print("Agente: Servidor Flask detenido.") # Este mensaje solo se verá si app.run() sale
+
+    print("Agente: Intentando iniciar el servidor Flask...") 
+    app.run(host='0.0.0.0', port=5002, debug=True) 
+    print("Agente: Servidor Flask detenido.") 

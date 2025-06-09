@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request
 from services.db import fetch_all, fetch_one
 import threading
 import time
-from datetime import datetime # Importar datetime para el formato de fecha
+from datetime import datetime 
 from services.db import execute_query
 from routes.stats import registrar_evento
 
@@ -80,7 +80,7 @@ def get_multicast_stream_info():
                 servers_wrr = generate_wrr_list()
                 if servers_wrr:
                     selected_server = servers_wrr[rr_index % len(servers_wrr)]
-                    rr_index = (rr_index + 1) % len(servers_wrr) # Incrementar y volver al principio
+                    rr_index = (rr_index + 1) % len(servers_wrr) 
                 else:
                     print("No hay servidores activos para Weighted Round Robin.")
         else:
@@ -113,11 +113,9 @@ def get_mininet_hosts():
     Endpoint para obtener una lista de hosts disponibles desde la tabla 'hosts' de la base de datos.
     """
     try:
-        query_hosts = "SELECT nombre FROM hosts;" # Selecciona la columna 'nombre'
-        hosts_data = fetch_all(query_hosts) # Ejecuta la consulta a la DB
+        query_hosts = "SELECT nombre FROM hosts;" 
+        hosts_data = fetch_all(query_hosts) 
         
-        # Formatea los datos para que coincidan con el formato esperado por el frontend
-        # que es {"hosts": [{"name": "h1_1"}, ...]}
         hosts = [{"name": h['nombre']} for h in hosts_data]
         
         return jsonify({"hosts": hosts}), 200

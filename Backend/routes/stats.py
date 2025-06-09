@@ -1,4 +1,3 @@
-# Nuevo endpoint Flask: stats_dashboard.py
 from flask import Blueprint, jsonify
 from services.db import fetch_all
 
@@ -24,27 +23,27 @@ def registrar_evento(tipo, nombre_host):
 @bp.route('/dashboard', methods=['GET'])
 def get_dashboard_stats():
     try:
-        # 1. Clientes por servidor
+        # Clientes por servidor
         clientes_por_servidor = fetch_all("""
             SELECT servidor_asignado AS servidor, COUNT(*) AS total_clientes
             FROM clientes_activos
             GROUP BY servidor_asignado;
         """)
 
-        # 2. Total de transmisiones (grupos multicast activos)
+        # Total de transmisiones 
         transmisiones_activas = fetch_all("""
             SELECT COUNT(DISTINCT ip_destino) AS total_transmisiones
             FROM servidores_vlc_activos
             WHERE status = 'activo';
         """)[0]['total_transmisiones']
 
-        # 3. Clientes activos totales
+        # Clientes activos totales
         total_clientes = fetch_all("""
             SELECT COUNT(*) AS total_clientes
             FROM clientes_activos;
         """)[0]['total_clientes']
 
-        # 4. Carga vs peso
+        # Carga vs peso
         carga_vs_peso = fetch_all("""
             SELECT s.host_name AS servidor, s.server_weight AS peso_configurado,
                    COUNT(c.host_cliente) AS clientes_asignados
@@ -54,7 +53,7 @@ def get_dashboard_stats():
             GROUP BY s.host_name, s.server_weight;
         """)
 
-        # 5. Últimos eventos (limitado a 10)
+        # Últimos eventos 
         ultimos_eventos = fetch_all("""
             SELECT h.nombre AS host, e.tipo AS tipo_evento, e.timestamp
             FROM estadisticas e
@@ -63,7 +62,7 @@ def get_dashboard_stats():
             LIMIT 10;
         """)
 
-        # 6. Total de flujos multicast activos (suma de puertos IGMP por grupo)
+        # Total de flujos multicast activos 
         flujos_multicast = fetch_all("""
             SELECT ip_destino AS grupo, COUNT(*) AS total_puertos
             FROM clientes_activos

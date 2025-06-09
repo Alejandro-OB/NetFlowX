@@ -14,7 +14,7 @@ class Config:
     DB_PASSWORD = os.environ.get("DB_PASSWORD", "geant")
 
     # URL (o IP:PUERTO) de tu agente Mininet
-    MININET_AGENT_URL = os.environ.get("MININET_AGENT_URL", "http://192.168.18.209:5002")
+    MININET_AGENT_URL = os.environ.get("MININET_AGENT_URL", "http://192.168.18.208:5002")
 
     # String de conexión a la BD
     @staticmethod

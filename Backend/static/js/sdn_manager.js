@@ -1,6 +1,5 @@
 let chartInstance;
 
-// Función para alternar entre pestañas
 function mostrarPestaña(pestañaId, tabElement) {
   document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active-content'));
   document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
@@ -51,10 +50,10 @@ async function obtenerMaxRuleID() {
       const respuesta = await fetch(apiUrl);
       if (!respuesta.ok) throw new Error(`Error HTTP: ${respuesta.status}`);
       const data = await respuesta.json();
-      return data.next_rule_id || Date.now();  // ✅ Si falla, usa un ID basado en el tiempo
+      return data.next_rule_id || Date.now();  
   } catch (error) {
       console.error("Error al obtener max_rule_id:", error);
-      return Date.now();  // ✅ Nunca devuelve `null`, evitando fallos en agregarRegla()
+      return Date.now();  
   }
 }
 async function cargarReglaParaModificar() {
@@ -69,7 +68,6 @@ async function cargarReglaParaModificar() {
         if (!respuesta.ok) throw new Error(`Error HTTP: ${respuesta.status}`);
         const regla = await respuesta.json();
 
-        // ✅ Llenar los campos del formulario con los datos actuales
         document.getElementById("mod_priority").value = regla.priority || "";
         document.getElementById("mod_eth_type").value = regla.eth_type || "";
         document.getElementById("mod_ip_proto").value = regla.ip_proto || "";
@@ -79,7 +77,6 @@ async function cargarReglaParaModificar() {
         document.getElementById("mod_tcp_dst").value = regla.tcp_dst || "";
         document.getElementById("mod_in_port").value = regla.in_port || "";
 
-        // ✅ Manejo de acciones
         if (regla.actions && regla.actions.length > 0) {
             const primeraAccion = regla.actions[0];
             document.getElementById("mod_actions").value = primeraAccion.type || "";
@@ -113,7 +110,7 @@ function validarAccionModificar() {
         outPort.placeholder = "Ingrese el puerto de salida";
     } else {
         outPort.disabled = true;
-        outPort.value = ""; // Se limpia el campo si no es OUTPUT
+        outPort.value = ""; 
         outPort.placeholder = "No requerido";
     }
 }

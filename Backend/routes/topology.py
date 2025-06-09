@@ -24,7 +24,6 @@ def get_topology():
     Endpoint para obtener la información completa de la topología (switches, hosts, enlaces).
     """
     try:
-        # Modificación clave: Añadir 'status' a la selección
         switches_data = fetch_all("SELECT id_switch, nombre, switch_label AS dpid, latitud, longitud, status FROM switches;")
         formatted_switches = []
         switches_by_id = {}
@@ -40,7 +39,7 @@ def get_topology():
                     'dpid': sw['dpid'],
                     'latitud': lat,
                     'longitud': lon,
-                    'status': sw['status']  # Incluir el estado
+                    'status': sw['status']  
                 }
                 formatted_switches.append(formatted_sw_entry)
                 switches_by_id[sw['id_switch']] = formatted_sw_entry
@@ -93,11 +92,7 @@ def get_topology():
     
 @topology_bp.route('/enlace', methods=['POST'])
 def create_enlace():
-    """
-    Crea un nuevo enlace. JSON esperado: { id_origen, id_destino, ancho_banda }.
-    Al mismo tiempo, asigna el siguiente puerto libre para cada switch en la tabla 'puertos'
-    y notifica al agente Mininet para crear el patch-port en caliente.
-    """
+
     data = request.get_json() or {}
     if not verificar_agente_y_mininet():
         return jsonify({"error": "Mininet o el agente no están activos. No se puede crear el enlace."}), 503
@@ -110,7 +105,7 @@ def create_enlace():
         return jsonify({"error": "Parámetros inválidos (deben ser enteros positivos)"}), 400
 
     try:
-        # 1) Inserción en 'enlaces'
+        # Inserción en 'enlaces'
         rows_affected = execute_query(
             """
             INSERT INTO enlaces (id_origen, id_destino, ancho_banda)
@@ -121,7 +116,7 @@ def create_enlace():
         if rows_affected <= 0:
             return jsonify({"error": "No se pudo crear el enlace (0 filas afectadas)"}), 500
 
-        # 2) Calcular el siguiente puerto disponible en SWITCH ORIGEN (io)
+        #  Calcular el siguiente puerto disponible en SWITCH ORIGEN (io)
         row_origen = fetch_one(
             """
             SELECT GREATEST(
@@ -133,7 +128,7 @@ def create_enlace():
         )
         next_port_origen = (row_origen['max_port'] or 0) + 1
 
-        # 3) Calcular el siguiente puerto disponible en SWITCH DESTINO (id_)
+        # Calcular el siguiente puerto disponible en SWITCH DESTINO (id_)
         row_destino = fetch_one(
             """
             SELECT GREATEST(
@@ -145,7 +140,7 @@ def create_enlace():
         )
         next_port_destino = (row_destino['max_port'] or 0) + 1
 
-        # 4) Insertar en 'puertos' el nuevo registro
+        # Insertar en 'puertos' el nuevo registro
         execute_query(
             """
             INSERT INTO puertos (
@@ -161,7 +156,7 @@ def create_enlace():
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
-                str(io),       # nodo_origen (texto; aquí guardamos el ID como cadena)
+                str(io),       # nodo_origen 
                 str(id_),      # nodo_destino
                 next_port_origen,
                 next_port_destino,
@@ -172,7 +167,7 @@ def create_enlace():
             )
         )
 
-        # 5) Notificar al agente Mininet para crear el patch-port en caliente
+        # Notificar al agente Mininet para crear el patch-port en caliente
         agent_data = {}
         try:
             agent_resp = requests.post(
@@ -183,21 +178,19 @@ def create_enlace():
             if agent_resp.headers.get("Content-Type", "").startswith("application/json"):
                 agent_data = agent_resp.json()
             if agent_resp.status_code != 200:
-                # Si el agente devuelve error, devolvemos un warning en la respuesta final
                 return jsonify({
                     "message": f"Enlace {io}→{id_} creado en BD con puertos {io}:{next_port_origen} ↔ {id_}:{next_port_destino}, "
                                "pero error al notificar a Mininet.",
                     "agent_error": agent_data
                 }), 201
         except Exception as agent_err:
-            # Error de comunicación con el agente
             return jsonify({
                 "message": f"Enlace {io}→{id_} creado en BD con puertos {io}:{next_port_origen} ↔ {id_}:{next_port_destino}, "
                            "pero no se pudo comunicar con el agente Mininet.",
                 "agent_error": str(agent_err)
             }), 201
 
-        # 6) Responder con mensaje de éxito completo (BD + agente)
+        #  Responder con mensaje de éxito completo (BD + agente)
         return jsonify({
             "message": f"Enlace {io}→{id_} creado con {bw} Mbps; "
                        f"puertos asignados: {io}:{next_port_origen} ↔ {id_}:{next_port_destino}",
@@ -301,7 +294,6 @@ def update_enlace():
             else:
                 return jsonify({"error": "No se actualizaron los datos (sin cambios detectados)"}), 400
 
-        # 1. Actualizar el enlace
         execute_query("""
             UPDATE enlaces
             SET id_origen = %s,
@@ -311,7 +303,6 @@ def update_enlace():
                OR (id_origen = %s AND id_destino = %s)
         """, (new_io, new_id_, new_bw, old_io, old_id_, old_id_, old_io))
 
-        # 2. Calcular nuevos puertos
         fila1 = fetch_one("""
             SELECT GREATEST(
               COALESCE((SELECT MAX(puerto_origen) FROM puertos WHERE id_origen_switch = %s), 0),
@@ -328,7 +319,6 @@ def update_enlace():
         """, (new_id_, new_id_))
         next_port_destino = (fila2['max_port'] or 0) + 1
 
-        # 3. Insertar nuevos puertos
         execute_query("""
             INSERT INTO puertos (
               nodo_origen, nodo_destino, puerto_origen, puerto_destino,
@@ -343,7 +333,6 @@ def update_enlace():
             None, None
         ))
 
-        # 4. Notificar al agente Mininet
         agent_resp = requests.post(
             f"{url_agent}/mininet/update_link",
             json={
@@ -359,7 +348,6 @@ def update_enlace():
         if agent_resp.headers.get("Content-Type", "").startswith("application/json"):
             agent_data = agent_resp.json()
 
-        # 5. SOLO AHORA eliminar la fila antigua de 'puertos'
         execute_query("""
             DELETE FROM puertos
             WHERE (id_origen_switch = %s AND id_destino_switch = %s)
@@ -400,7 +388,6 @@ def delete_enlace():
     origen_id = data.get('id_origen')
     destino_id = data.get('id_destino')
 
-    # Validar que los IDs existan y sean enteros positivos
     try:
         origen_id = int(origen_id)
         destino_id = int(destino_id)
@@ -412,7 +399,6 @@ def delete_enlace():
         }), 400
 
     try:
-        # 1) Eliminar de 'enlaces' (se considera que el enlace es bidireccional)
         rows_enlace = execute_query("""
             DELETE FROM enlaces
             WHERE (id_origen = %s AND id_destino = %s)
@@ -420,7 +406,6 @@ def delete_enlace():
         """, (origen_id, destino_id, destino_id, origen_id))
 
         if rows_enlace > 0:
-            # 2) Notificar al agente Mininet para que elimine el patch en caliente
             try:
                 agent_resp = requests.post(
                     f"{url_agent}/mininet/delete_link",
@@ -431,7 +416,6 @@ def delete_enlace():
                 if agent_resp.headers.get("Content-Type", "").startswith("application/json"):
                     agent_data = agent_resp.json()
 
-                # ✅ 3) SOLO AHORA eliminar la fila correspondiente en 'puertos'
                 execute_query("""
                     DELETE FROM puertos
                     WHERE (id_origen_switch = %s AND id_destino_switch = %s)
@@ -450,7 +434,6 @@ def delete_enlace():
                     "agent_error": str(agent_err)
                 }), 200
 
-            # 4) Responder éxito completo
             return jsonify({
                 "message": f"Enlace (IDs: {origen_id}↔{destino_id}) y registro de puertos asociado eliminado exitosamente.",
                 "agent": agent_data

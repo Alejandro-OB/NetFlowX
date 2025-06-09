@@ -1,15 +1,12 @@
-// Array global para mantener el estado de los clientes FFplay activos
 window.activeFFplayClients = [];
 
 function setActiveClients(clients) {
-  window.activeFFplayClients = [...clients]; // ✅ Reemplaza completamente el array
+  window.activeFFplayClients = [...clients]; 
 }
 
 
-// --- Funciones de Clientes Multicast ---
 async function loadMininetHosts() {
     try {
-        // 1. Obtener todos los hosts de Mininet
         const allHostsResponse = await fetch(`${API_BASE_URL}/client/hosts`);
         if (!allHostsResponse.ok) {
             throw new Error(`HTTP error! status: ${allHostsResponse.status}`);
@@ -17,27 +14,22 @@ async function loadMininetHosts() {
         const allHostsData = await allHostsResponse.json();
         const allMininetHosts = allHostsData.hosts || [];
 
-        // 2. Obtener los servidores activos
         const activeServersResponse = await fetch(`${API_BASE_URL}/servers/active_servers`);
         if (!activeServersResponse.ok) {
             const errorData = await activeServersResponse.json().catch(() => ({ message: 'Unknown error' }));
             throw new Error(`HTTP error! status: ${activeServersResponse.status} - ${errorData.message || activeServersResponse.statusText}`);
         }
         const activeServersData = await activeServersResponse.json();
-        // Mapear los datos de los servidores activos a una lista de sus nombres de host
         const activeServerNames = activeServersData.map(server => server.host_name);
 
         const clientHostSelect = document.getElementById('clientHost');
-        clientHostSelect.innerHTML = ''; // Limpiar opciones existentes
+        clientHostSelect.innerHTML = ''; 
 
-        // 3. Filtrar los hosts: solo incluir aquellos que NO son servidores activos
         const availableClientHosts = allMininetHosts.filter(host => {
             return !activeServerNames.includes(host.name);
         });
 
-        // 4. Poblar el dropdown con la lista filtrada
         if (availableClientHosts.length > 0) {
-            // Añadir una opción por defecto para seleccionar
             const defaultOption = document.createElement('option');
             defaultOption.value = '';
             defaultOption.textContent = 'Seleccionar Cliente';
@@ -49,13 +41,13 @@ async function loadMininetHosts() {
                 option.textContent = host.name;
                 clientHostSelect.appendChild(option);
             });
-            clientHostSelect.disabled = false; // Habilitar el dropdown si hay hosts
+            clientHostSelect.disabled = false; 
         } else {
             const option = document.createElement('option');
             option.value = '';
             option.textContent = 'No hay hosts disponibles para clientes';
             clientHostSelect.appendChild(option);
-            clientHostSelect.disabled = true; // Deshabilitar si no hay hosts
+            clientHostSelect.disabled = true; 
         }
     } catch (error) {
         console.error('Error cargando hosts de Mininet o servidores activos:', error);
@@ -70,7 +62,7 @@ async function loadMininetHosts() {
 async function updateActiveClientsTable() {
     const tableBody = document.getElementById('active-ffplay-clients-list');
     if (!tableBody) return;
-    tableBody.innerHTML = ''; // ✅ LIMPIAR TABLA
+    tableBody.innerHTML = ''; 
 
     try {
         const response = await fetch(`${API_BASE_URL}/client/active_clients?nocache=${Date.now()}`);
@@ -101,7 +93,6 @@ async function updateActiveClientsTable() {
             tableBody.appendChild(tr);
         });
 
-        // ✅ Agregar listeners de detener
         document.querySelectorAll('.stop-ffplay-client-btn').forEach(button => {
             button.addEventListener('click', async (event) => {
                 const host = event.target.dataset.host;
@@ -139,7 +130,7 @@ async function startFFmpegClient(host, streamInfo) {
             await updateHostClientStatus(host, true);
 
             if (!serverName || !multicastIp || !multicastPort) {
-                console.error("❌ Datos incompletos del servidor:", streamInfo);
+                console.error(" Datos incompletos del servidor:", streamInfo);
                 showMessageModal("Error", "La información del servidor asignado está incompleta.");
                 return;
             }
@@ -201,7 +192,6 @@ async function stopFFmpegClient(host, ffplayPid = null) {
 
 
 
-// Event listener para el botón "Solicitar Video Multicast"
 document.getElementById('requestStreamBtn').addEventListener('click', async () => {
     const clientHost = document.getElementById('clientHost').value;
     const streamInfoParagraph = document.getElementById('streamInfo');
@@ -212,7 +202,6 @@ document.getElementById('requestStreamBtn').addEventListener('click', async () =
         return;
     }
 
-    // Verificar si el host ya está en la lista de clientes activos (para evitar duplicados)
     if (activeFFplayClients.some(client => client.host === clientHost)) {
         showMessageModal('Advertencia', `El host ${clientHost} ya tiene un cliente FFplay activo.`);
         return;
@@ -226,18 +215,16 @@ document.getElementById('requestStreamBtn').addEventListener('click', async () =
             streamInfoParagraph.textContent = `Asignado al servidor: ${data.host_name}. IP Multicast: ${data.multicast_ip}:${data.multicast_port}. Iniciando cliente FFplay...`;
             streamInfoParagraph.className = 'mt-2 text-sm text-green-600';
 
-            // Crear objeto con la información del stream
             const streamInfo = {
                 serverName: data.host_name,
                 multicastIp: data.multicast_ip,
                 multicastPort: data.multicast_port
             };
 
-            // Iniciar cliente FFplay con toda la info del servidor
             await startFFmpegClient(clientHost, streamInfo);
 
         } else {
-            console.error("❌ Datos incompletos del backend:", data);
+            console.error(" Datos incompletos del backend:", data);
             streamInfoParagraph.textContent = `Error: No se pudo obtener información completa del servidor.`;
             streamInfoParagraph.className = 'mt-2 text-sm text-red-600';
         }
@@ -250,7 +237,7 @@ document.getElementById('requestStreamBtn').addEventListener('click', async () =
 
 async function addActiveClientToDB(host, serverIp, port, videoFile, serverName) {
     if (!host || !serverIp || !port || !videoFile || !serverName) {
-        console.error("❌ Parámetros incompletos para guardar en BD:", { host, serverIp, port, videoFile, serverName });
+        console.error(" Parámetros incompletos para guardar en BD:", { host, serverIp, port, videoFile, serverName });
         return;
     }
     try {
@@ -267,10 +254,10 @@ async function addActiveClientToDB(host, serverIp, port, videoFile, serverName) 
         });
         const data = await response.json();
         if (!response.ok || !data.success) {
-            console.error(`❌ Error al añadir cliente activo a la DB para ${host}: ${data.error || 'Desconocido'}`);
+            console.error(` Error al añadir cliente activo a la DB para ${host}: ${data.error || 'Desconocido'}`);
         }
     } catch (error) {
-        console.error(`❌ Error de conexión al añadir cliente activo a la DB para ${host}:`, error);
+        console.error(`Error de conexión al añadir cliente activo a la DB para ${host}:`, error);
     }
 }
 
@@ -321,8 +308,8 @@ async function loadActiveClientsFromDB() {
 
         console.log('Clientes activos actualizados:', clients.map(c => c.host));
 
-        await updateActiveClientsTable();     // ✅ redibuja tabla
-        await actualizarIconosDeHosts?.();    // ✅ cambia íconos
+        await updateActiveClientsTable();    
+        await actualizarIconosDeHosts?.();   
     } catch (error) {
         console.error('Error cargando clientes activos desde la DB:', error);
         showMessageModal('Error', 'No se pudieron cargar los clientes activos: ' + error.message);
@@ -330,7 +317,6 @@ async function loadActiveClientsFromDB() {
 }
 
 
-// --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
     loadMininetHosts(); 
 });

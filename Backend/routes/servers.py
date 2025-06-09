@@ -8,7 +8,7 @@ from routes.stats import registrar_evento
 
 
 from config import Config
-from services.db import fetch_all, fetch_one, execute_query  # Importamos las funciones desde db.py
+from services.db import fetch_all, fetch_one, execute_query  
 
 servers_bp = Blueprint('servers', __name__)
 url_agent = Config.MININET_AGENT_URL
@@ -30,17 +30,7 @@ def get_next_multicast_ip():
 
 @servers_bp.route('/add', methods=['POST'])
 def iniciar_servidor_hosts_table():
-    """
-    Ruta POST /add:
-    1. Recibe JSON con { "host_name": str, "video_path": str, "server_weight": int (opcional) }
-    2. Valida que host_name y video_path existan y tengan el formato correcto
-    3. Si el host ya existe en la tabla servidores_vlc_activos, reutiliza ip_destino y puerto
-       en caso contrario, genera uno nuevo (IP multicast + puerto 5004)
-    4. Inserta o actualiza el registro en PostgreSQL usando execute_query()
-    5. Llama al agente Mininet (MININET_AGENT_URL) para iniciar el servidor FFmpeg
-    6. Actualiza el PID de FFmpeg en la BD (campo process_pid)
-    7. Devuelve JSON con { multicast_ip, multicast_port } o un error
-    """
+
     data = request.get_json()
     host_name    = data.get('host_name')
     video_path   = data.get('video_path')
@@ -53,7 +43,6 @@ def iniciar_servidor_hosts_table():
         return jsonify({"error": "Formato de host_name inválido"}), 400
 
     try:
-        # 1) ¿Ya existe este host en la tabla?
         existing_server = fetch_one(
             "SELECT ip_destino, puerto FROM servidores_vlc_activos WHERE host_name = %s;",
             (host_name,)
@@ -66,7 +55,7 @@ def iniciar_servidor_hosts_table():
             multicast_ip   = get_next_multicast_ip()
             multicast_port = 5004
 
-        # 2) INSERT o UPDATE en la tabla servidores_vlc_activos
+        # INSERT o UPDATE en la tabla servidores_vlc_activos
         query_vlc = """
             INSERT INTO servidores_vlc_activos (
                 host_name, video_path, ip_destino, puerto, status, server_weight
@@ -85,7 +74,7 @@ def iniciar_servidor_hosts_table():
         if result is False:
             return jsonify({"error": "No se pudo insertar/actualizar servidor VLC en la base de datos."}), 500
 
-        # 3) Llamada al agente Mininet para iniciar FFmpeg
+        # Llamada al agente Mininet para iniciar FFmpeg
         response_agent = requests.post(
             f"{url_agent}/mininet/start_ffmpeg_server",
             json={
@@ -99,7 +88,7 @@ def iniciar_servidor_hosts_table():
             agent_response = response_agent.json()
             if agent_response.get("success"):
                 ffmpeg_pid = agent_response.get("ffmpeg_pid")
-                # 4) Actualizar process_pid en la BD
+                # Actualizar process_pid en la BD
                 execute_query(
                     "UPDATE servidores_vlc_activos SET process_pid = %s WHERE host_name = %s;",
                     (ffmpeg_pid, host_name)
@@ -207,7 +196,6 @@ def get_active_servers():
         """
         active_servers = fetch_all(query)
 
-        # Formatear last_updated a ISO si existe
         for server in active_servers:
             if server.get('last_updated') is not None and isinstance(server['last_updated'], datetime):
                 server['last_updated'] = server['last_updated'].isoformat()

@@ -1,13 +1,12 @@
-// --- index.js ---
+
 // ==============================
 //  Constantes Globales
 // ==============================
 const API_BASE_URL      = 'http://192.168.18.151:5000';
-const MININET_AGENT_URL = 'http://192.168.18.209:5002';  // ya no se usa en este archivo
+const MININET_AGENT_URL = 'http://192.168.18.208:5002';  
 
 // ==============================
 //  Función auxiliar para mostrar modales
-//  (Se reutiliza la misma de topology.js si ambos archivos están cargados.)
 // ==============================
 function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
   console.log('showMessageModal:', title, message, isConfirm, onConfirm);
@@ -54,7 +53,7 @@ function showMessageModal(title, message, isConfirm = false, onConfirm = null) {
 // =======================================
 async function updateDashboard() {
   try {
-    // 1) Obtener cantidad de servidores activos
+    // Obtener cantidad de servidores activos
     const srvRes = await fetch(`${API_BASE_URL}/servers/active_servers`);
     if (!srvRes.ok) {
       const err = await srvRes.json().catch(() => ({ message: 'Unknown error' }));
@@ -63,7 +62,7 @@ async function updateDashboard() {
     const srvData = await srvRes.json();
     document.getElementById('active-servers-count').textContent = srvData.length;
 
-    // 2) Obtener algoritmo de balanceo y enrutamiento actual
+    // Obtener algoritmo de balanceo y enrutamiento actual
     const cfgRes = await fetch(`${API_BASE_URL}/config/current`);
     if (!cfgRes.ok) {
       const err = await cfgRes.json().catch(() => ({ message: 'Unknown error' }));
@@ -83,10 +82,10 @@ async function updateDashboard() {
       }
     }
 
-    // 3) Actualizar estado del controlador
+    // Actualizar estado del controlador
     await updateControllerStatus();
 
-    // 4) Obtener y mostrar clientes activos en el dashboard
+    // Obtener y mostrar clientes activos en el dashboard
     const dashboardListDiv = document.getElementById('active-http-clients-dashboard-list');
     dashboardListDiv.innerHTML = ''; 
 
@@ -337,7 +336,6 @@ async function loadActiveLinks() {
       }
     });
 
-    // Agregar listeners a botones “Editar” y “Eliminar”
     document.querySelectorAll('.edit-link-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const oId = e.target.dataset.origenId;
@@ -395,7 +393,6 @@ document.getElementById('create-link-btn')?.addEventListener('click', async () =
   }
 
   try {
-    // 1) Crear enlace en la API central (el backend llamará a /mininet/add_link)
     const res = await fetch(`${API_BASE_URL}/topology/enlace`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -408,20 +405,16 @@ document.getElementById('create-link-btn')?.addEventListener('click', async () =
     const result = await res.json();
     if (!res.ok) throw new Error(result.error || result.message || 'Error al crear enlace en la BD.');
 
-    // 2) Informar éxito en la UI
     statusMsg.textContent = result.message || 'Enlace creado correctamente.';
     statusMsg.className   = 'mt-2 text-sm text-green-600';
 
-    // 3) Si el backend incluyó mensaje del agente, mostrarlo
     if (result.agent && result.agent.message) {
       showMessageModal('Mininet Agent', result.agent.message);
     }
 
-    // 4) Refrescar la vista de la topología y los enlaces
     loadTopology();
     loadActiveLinks();
 
-    // 5) Limpiar formulario
     document.getElementById('new-link-origen').value  = '';
     document.getElementById('new-link-destino').value = '';
     document.getElementById('new-link-bw').value       = '';
@@ -442,7 +435,6 @@ async function deleteLink(origenId, destinoId, origenName, destinoName) {
     true,
     async () => {
       try {
-        // 1) Llamar a DELETE /topology/enlace (el backend llamará a /mininet/delete_link)
         const res = await fetch(`${API_BASE_URL}/topology/enlace`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
@@ -454,10 +446,8 @@ async function deleteLink(origenId, destinoId, origenName, destinoName) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || data.message || 'Unknown error');
 
-        // 2) Mostrar mensaje de éxito
         showMessageModal('Éxito', data.message || 'Enlace eliminado exitosamente.');
 
-        // 4) Refrescar vista
         loadTopology();
         loadActiveLinks();
       } catch (err) {
@@ -526,7 +516,6 @@ document.getElementById('save-edited-link-btn')?.addEventListener('click', async
   const newOrigenId  = parseInt(document.getElementById('edit-link-new-origen-id')?.value, 10);
   const newDestinoId = parseInt(document.getElementById('edit-link-new-destino-id')?.value, 10);
 
-  // Validaciones básicas
   if (!newBw || isNaN(newBw) || parseInt(newBw, 10) <= 0) {
     showMessageModal('Error', 'Ingresa un ancho de banda válido.');
     return;
@@ -537,24 +526,20 @@ document.getElementById('save-edited-link-btn')?.addEventListener('click', async
   }
 
   try {
-    // Construir payload para el backend
     const payload = {
       id_origen:   newOrigenId,
       id_destino:  newDestinoId,
       ancho_banda: parseInt(newBw, 10)
     };
 
-    // Si cambiaron switches, enviamos old_id_origen/old_id_destino
     if (newOrigenId !== oldOrigenId || newDestinoId !== oldDestinoId) {
       payload.old_id_origen  = oldOrigenId;
       payload.old_id_destino = oldDestinoId;
     } else {
-      // Si no cambiaron switches, podemos enviar old_ = new_
       payload.old_id_origen  = newOrigenId;
       payload.old_id_destino = newDestinoId;
     }
 
-    // Llamar a PUT /topology/enlace (el backend llamará a /mininet/update_link)
     const res = await fetch(`${API_BASE_URL}/topology/enlace`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -563,12 +548,10 @@ document.getElementById('save-edited-link-btn')?.addEventListener('click', async
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || data.message || 'Unknown error');
 
-    // Mostrar mensaje de éxito
     showMessageModal('Éxito', data.message || 'Enlace actualizado exitosamente.');
 
     
 
-    // Cerrar modal y refrescar vista
     document.getElementById('edit-link-modal')?.classList.add('hidden');
     loadTopology();
     loadActiveLinks();

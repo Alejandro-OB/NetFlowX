@@ -1,9 +1,8 @@
-# Imports para PostgreSQL y Ryu
 import psycopg2
 import sys
 import collections
-import threading # Importar para hilos
-import time      # Importar para pausas
+import threading 
+import time      
 
 from ryu.base import app_manager
 from ryu.controller import ofp_event
@@ -16,37 +15,31 @@ from ryu.lib.packet import ether_types
 from ryu.lib.packet import arp
 from ryu.lib.packet import ipv4
 from ryu.lib.packet import icmp
-from ryu.lib.packet import igmp # Importar IGMP
+from ryu.lib.packet import igmp 
 from ryu.ofproto import inet 
 from ryu.controller.handler import DEAD_DISPATCHER
 
-import psycopg2.extras # Para obtener resultados de la DB como diccionarios
+import psycopg2.extras 
 import requests
 
 import logging
 from logging.handlers import RotatingFileHandler
 log_filename = 'ryu_output.log'
-handler = RotatingFileHandler(log_filename, maxBytes=10*1024*1024, backupCount=5)  # 10 MB, 5 backups
+handler = RotatingFileHandler(log_filename, maxBytes=10*1024*1024, backupCount=5)  
 formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 handler.setFormatter(formatter)
 
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)  # Puedes cambiar a INFO si quieres menos verbosidad
+root_logger.setLevel(logging.INFO)  
 root_logger.addHandler(handler)
 class Controller(app_manager.RyuApp):
-    # Define las versiones de OpenFlow soportadas
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
     def __init__(self, *args, **kwargs):
-        """
-        Constructor del controlador.
-        Inicializa las estructuras de datos y carga la topología de la base de datos.
-        """
+
         super(Controller, self).__init__(*args, **kwargs)
-        # Diccionario para mapear dpid a {dirección MAC -> puerto de salida}
         self.mac_to_port = {}
 
-        # Estructuras para la topología cargada de la base de datos
         # Mapea dpid (entero) a información del switch (ej. {'nombre': 's1', 'latitud': X, 'longitud': Y, 'dpid_str': '00...'})
         self.switches_by_dpid = {}
         # Mapea MAC de host (string) a {'dpid': dpid del switch, 'port': puerto del switch al host, 'ip': IP del host, 'name': nombre del host}
@@ -56,8 +49,6 @@ class Controller(app_manager.RyuApp):
         # Mapea MAC de host (string) a IP de host (string) - para ARP
         self.host_mac_to_ip = {}
 
-
-        # Almacena objetos datapath para enviar reglas de flujo a cualquier switch
         self.datapaths = {}
 
         # Tabla ARP para el controlador (IP -> MAC)
@@ -65,35 +56,28 @@ class Controller(app_manager.RyuApp):
 
         self._last_installed_tree = {}
 
-        # NUEVO: Estructuras de datos específicas para Multicast
         # {multicast_ip: {dpid_switch: [puertos_interesados]}}
         self.multicast_group_members = collections.defaultdict(lambda: collections.defaultdict(list))
         # {multicast_ip: dpid_switch_fuente}
         self.multicast_sources = {}
-        # {multicast_ip: {dpid1, dpid2, ...}} - Para rastrear dónde se han instalado flujos multicast
+        # {multicast_ip: {dpid1, dpid2, ...}}
         self.multicast_flow_installed_at = collections.defaultdict(set)
 
-        self.db_lock = threading.Lock() # Para la sincronización de acceso a la DB
-        # CORRECCIÓN: Cambiar a RLock para permitir el bloqueo re-entrante
-        self.topology_lock = threading.RLock() # Para actualizaciones del grafo de topología
+        self.db_lock = threading.Lock() 
+        self.topology_lock = threading.RLock() 
 
         self.logger.info("Aplicación de Controlador Ryu Inicializada")
-        # Carga la topología y la configuración de enrutamiento desde la base de datos
         self._load_topology_from_db()
 
-        # Iniciar hilos DESPUÉS de que los métodos estén definidos y la topología cargada
         self.update_server_thread = threading.Thread(target=self._update_server_info_periodically)
-        self.update_server_thread.daemon = True # El hilo se cerrará cuando el programa principal termine
+        self.update_server_thread.daemon = True 
         self.update_server_thread.start()
 
         self.logger.info("Hilos de monitoreo iniciados.")
 
 
     def _get_db_connection(self):
-        """
-        Establece y retorna una conexión a la base de datos PostgreSQL.
-        """
-        # Asegúrate de que estos detalles coincidan con tu configuración de DB
+
         return psycopg2.connect(
             dbname="geant_network",
             user="geant_user",
@@ -103,20 +87,16 @@ class Controller(app_manager.RyuApp):
         )
 
     def _load_topology_from_db(self):
-        """
-        Carga la topología de la red (switches, hosts, enlaces, puertos, ancho de banda)
-        desde la base de datos PostgreSQL y construye la representación interna del grafo.
-        También carga la configuración del algoritmo de enrutamiento.
-        """
+
         conn = None
         cur = None
         try:
             conn = self._get_db_connection()
-            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) # Usar DictCursor para obtener resultados como diccionarios
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) 
             self.logger.info("Conexión a la base de datos establecida.")
 
-            # 1. Obtener switches
-            # Seleccionar id_switch, nombre, latitud, longitud. El DPID se generará a partir de id_switch.
+            
+            # Seleccionar id_switch, nombre, latitud, longitud.
             cur.execute("SELECT id_switch, nombre, latitud, longitud FROM switches;")
             switch_list_raw = cur.fetchall()
 
@@ -129,7 +109,7 @@ class Controller(app_manager.RyuApp):
                 self.switches_by_dpid[dpid_int] = {
                     'id_switch': s['id_switch'],
                     'nombre': s['nombre'],
-                    'dpid_str': dpid_str, # Almacenar el string DPID generado
+                    'dpid_str': dpid_str, 
                     'latitud': s['latitud'],
                     'longitud': s['longitud']
                 }
@@ -139,8 +119,8 @@ class Controller(app_manager.RyuApp):
                 }
                 self.logger.debug(f"Switch cargado: {s['nombre']} (ID: {s['id_switch']}, DPID: {dpid_int})")
 
-            # 2. Obtener información de puertos para conexiones host-switch y switch-switch
-            # La clave es (nodo_origen, nodo_destino) y el valor es (puerto_origen, puerto_destino)
+            # Obtener información de puertos para conexiones host-switch y switch-switch
+            # clave es (nodo_origen, nodo_destino) valor (puerto_origen, puerto_destino)
             puertos_dict = {}
             cur.execute("SELECT nodo_origen, nodo_destino, puerto_origen, puerto_destino FROM puertos;")
             for p in cur.fetchall():
@@ -152,8 +132,7 @@ class Controller(app_manager.RyuApp):
             self.logger.info(f"Cargados {len(puertos_dict)} entradas de puertos.")
 
 
-            # 3. Obtener hosts y mapearlos a switches/puertos
-            # Usar 'ipv4' y 'switch_asociado' que son los nombres de columna correctos.
+            # Obtener hosts y mapearlos a switches/puertos
             cur.execute("SELECT nombre, switch_asociado, ipv4 AS ip, mac FROM hosts;")
             hosts_list = cur.fetchall()
 
@@ -174,15 +153,14 @@ class Controller(app_manager.RyuApp):
                 self.logger.info(f"Buscando puerto para el host {nombre_host} conectado al switch {ciudad_switch}")
 
                 puerto_en_switch_a_host = None
-                # La clave en puertos_dict es (nombre_switch, nombre_host)
                 if (ciudad_switch, nombre_host) in puertos_dict:
-                    puerto_en_switch_a_host = puertos_dict[(ciudad_switch, nombre_host)][0] # Puerto de salida del switch al host
-                elif (nombre_host, ciudad_switch) in puertos_dict: # Si está en la dirección opuesta
-                    puerto_en_switch_a_host = puertos_dict[(nombre_host, ciudad_switch)][1] # Puerto de entrada al switch desde el host
+                    puerto_en_switch_a_host = puertos_dict[(ciudad_switch, nombre_host)][0]
+                elif (nombre_host, ciudad_switch) in puertos_dict: 
+                    puerto_en_switch_a_host = puertos_dict[(nombre_host, ciudad_switch)][1]
 
                 if puerto_en_switch_a_host is None:
                     self.logger.warning(f"No se encontró puerto para el host {nombre_host} conectado al switch {ciudad_switch}. Usando puerto por defecto 1.")
-                    puerto_en_switch_a_host = 1 # Valor por defecto si no se encuentra puerto
+                    puerto_en_switch_a_host = 1
 
                 self.host_to_switch_map[mac] = {
                     'dpid': dpid_switch_asociado,
@@ -193,7 +171,7 @@ class Controller(app_manager.RyuApp):
                 self.host_mac_to_ip[mac] = ip
                 self.host_ip_to_mac[ip] = mac
                 self.mac_to_port.setdefault(dpid_switch_asociado, {})
-                self.mac_to_port[dpid_switch_asociado][mac] = puerto_en_switch_a_host # También para el aprendizaje de MACs
+                self.mac_to_port[dpid_switch_asociado][mac] = puerto_en_switch_a_host 
                 self.logger.info(f"Host cargado: {nombre_host} (MAC: {mac}, IP: {ip}) conectado a {ciudad_switch} (p{puerto_en_switch_a_host})")
 
             
@@ -212,9 +190,7 @@ class Controller(app_manager.RyuApp):
             self.logger.info(f"Cargados {len(self.switches_by_dpid)} switches y {len(self.host_to_switch_map)} hosts.")
 
     def update_switch_status_in_db(self, dpid, status):
-        """
-        Actualiza el estado de un switch en la base de datos.
-        """
+
         query = "UPDATE switches SET status = %s WHERE id_switch = %s;"
         try:
             with self.db_lock:
@@ -228,15 +204,8 @@ class Controller(app_manager.RyuApp):
         except Exception as e:
             self.logger.error(f"Fallo al actualizar el estado del switch {dpid} a '{status}': {e}")
 
-    
-
-
-
     def _update_server_info_periodically(self):
-        """
-        Hilo que consulta periódicamente la base de datos para obtener
-        la información de los servidores VLC activos y sus IPs multicast.
-        """
+
         while True:
             with self.db_lock:
                 conn = None
@@ -253,8 +222,6 @@ class Controller(app_manager.RyuApp):
                         multicast_ip = server['ip_destino']
 
                         server_dpid = None
-                        # Buscar el DPID del switch al que está conectado el host_name
-                        # Asumimos que `host_name` en `servidores_vlc_activos` es el mismo `nombre` de la tabla `hosts`
 
                         # Buscar el id_switch_conectado para el host_name
                         cur.execute("SELECT mac, switch_asociado FROM hosts WHERE nombre = %s;", (host_name,))
@@ -290,24 +257,10 @@ class Controller(app_manager.RyuApp):
                 finally:
                     if cur: cur.close()
                     if conn: conn.close()
-            time.sleep(10) # Consultar cada 10 segundos
-
-
-  
+            time.sleep(10) 
 
     def add_flow(self, datapath, priority, match, actions, buffer_id=None, idle_timeout=0, hard_timeout=0):
-        """
-        Función auxiliar para añadir una entrada de flujo a un switch.
 
-        Args:
-            datapath (ryu.controller.controller.Datapath): Objeto datapath del switch.
-            priority (int): Prioridad de la regla de flujo.
-            match (ryu.ofproto.ofproto_v1_3_parser.OFPMatch): Objeto de coincidencia para la regla.
-            actions (list): Lista de acciones para la regla.
-            buffer_id (int, optional): ID del búfer del paquete. Por defecto es None.
-            idle_timeout (int, optional): Tiempo de inactividad antes de que la regla expire. Por defecto es 0 (nunca expira por inactividad).
-            hard_timeout (int, optional): Tiempo máximo de vida de la regla. Por defecto es 0 (nunca expira).
-        """
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
@@ -330,7 +283,6 @@ class Controller(app_manager.RyuApp):
                                 out_port=ofproto.OFPP_ANY, out_group=ofproto.OFPG_ANY,
                                 match=match)
         datapath.send_msg(mod)
-        # CORRECCIÓN: Cambiar 'datatap' a 'datapath'
         self.logger.info(f"Flujo eliminado del switch {datapath.id} con match: {match}")
 
     def _send_packet_out(self, datapath, buffer_id, in_port, actions, data):
@@ -344,17 +296,7 @@ class Controller(app_manager.RyuApp):
         datapath.send_msg(out)
 
     def _send_arp_reply(self, datapath, target_mac, target_ip, src_mac, src_ip, out_port):
-        """
-        Envía una respuesta ARP proxy.
 
-        Args:
-            datapath (ryu.controller.controller.Datapath): Objeto datapath del switch.
-            target_mac (str): MAC del host que envió la solicitud ARP.
-            target_ip (str): IP del host que envió la solicitud ARP.
-            src_mac (str): MAC del host cuya IP se está solicitando (la MAC que estamos respondiendo).
-            src_ip (str): IP del host cuya MAC se está solicitando.
-            out_port (int): Puerto por donde enviar la respuesta ARP.
-        """
         parser = datapath.ofproto_parser
         # Construye el encabezado Ethernet
         eth = ethernet.ethernet(dst=target_mac, src=src_mac, ethertype=ether_types.ETH_TYPE_ARP)
@@ -366,12 +308,12 @@ class Controller(app_manager.RyuApp):
         pkt = packet.Packet()
         pkt.add_protocol(eth)
         pkt.add_protocol(arp_reply)
-        pkt.serialize() # Serializa el paquete para enviarlo
+        pkt.serialize() 
 
         actions = [parser.OFPActionOutput(out_port)]
         out = parser.OFPPacketOut(datapath=datapath,
-                                 buffer_id=0xffffffff, # No usar un buffer_id existente, enviar el paquete completo
-                                 in_port=datapath.ofproto.OFPP_CONTROLLER, # El paquete se origina en el controlador
+                                 buffer_id=0xffffffff, 
+                                 in_port=datapath.ofproto.OFPP_CONTROLLER, 
                                  actions=actions,
                                  data=pkt.data)
         datapath.send_msg(out)
@@ -382,18 +324,18 @@ class Controller(app_manager.RyuApp):
         Redirige la lógica IGMP a un backend externo vía HTTP.
         """
         self.logger.info(f"Redirigiendo IGMP a backend externo. switch={dpid}, puerto={in_port}, tipo={igmp_pkt.msgtype}")
-        url = "http://192.168.18.151:5000/igmp/process"  # Reemplaza con tu IP/backend si es distinto
+        url = "http://192.168.18.151:5000/igmp/process" 
 
         payload = {
             "dpid": dpid,
             "in_port": in_port,
             "msgtype": igmp_pkt.msgtype,
-            "records": [],  # Solo para IGMPv3
-            "address": igmp_pkt.address  # Importante para IGMPv2
+            "records": [],  
+            "address": igmp_pkt.address 
         }
 
 
-        if igmp_pkt.msgtype == 34:  # IGMPv3 Report
+        if igmp_pkt.msgtype == 34:  
             records = []
             for record in igmp_pkt.records:
                 records.append({
@@ -416,7 +358,6 @@ class Controller(app_manager.RyuApp):
                     group: {int(dpid): ports for dpid, ports in switches.items()}
                     for group, switches in result.get("group_membership", {}).items()
                 }
-                # Puedes interpretar la respuesta y decidir si instalar flujos
                 for group_ip in result.get("install_flows", []):
                     self._install_multicast_flows(group_ip)
                 for group_ip in result.get("remove_flows", []):
@@ -428,22 +369,17 @@ class Controller(app_manager.RyuApp):
 
     
     def _handle_multicast_ip_traffic(self, datapath, msg, dpid, in_port, multicast_ip):
-            """
-            Maneja el tráfico IP multicast que llega al controlador (Packet_In).
-            Esto suele ocurrir si no hay un flujo instalado o si ha expirado.
-            Ahora, solo se procesa si hay clientes suscritos al grupo.
-            """
+
             self.logger.debug(f"DEBUG: Entrando a _handle_multicast_ip_traffic para {multicast_ip} en switch {dpid} puerto {in_port}.")
             # Verificar si hay algún miembro para este grupo multicast en cualquier switch
             if not self.multicast_group_members.get(multicast_ip):
                 self.logger.debug(f"Tráfico IP Multicast {multicast_ip} de {dpid} en {in_port} llegó al controlador, pero no hay clientes suscritos. Descartando paquete.")
                 self.logger.debug(f"DEBUG: Saliendo de _handle_multicast_ip_traffic (sin suscriptores).")
-                return # Descartar el paquete si no hay suscriptores
+                return 
 
             self.logger.warning(f"Tráfico IP Multicast {multicast_ip} de {dpid} en {in_port} llegó al controlador. Re-evaluando e instalando flujos.")
             self.logger.debug(f"DEBUG: Llamando a _install_multicast_flows desde _handle_multicast_ip_traffic para {multicast_ip}.")
-            # No es necesario adquirir el lock aquí de nuevo, ya que _handle_multicast_ip_traffic no tiene el lock
-            # y _install_multicast_flows lo adquirirá internamente.
+
             if dpid not in self.multicast_flow_installed_at.get(multicast_ip, set()):
                 self.logger.debug(f"Instalando flujos para {multicast_ip} desde controlador (primera vez en {dpid}).")
                 self._install_multicast_flows(multicast_ip)
@@ -452,9 +388,6 @@ class Controller(app_manager.RyuApp):
                 return
             self.logger.debug(f"DEBUG: _install_multicast_flows finalizado desde _handle_multicast_ip_traffic.")
 
-            # Reenviar el paquete actual usando las reglas recién instaladas o un fallback
-            # Si los flujos se acaban de instalar, el siguiente paquete debería ser manejado por el switch.
-            # Para este paquete específico, podemos intentar reenviarlo si ya conocemos los puertos de salida.
             data = None
             if msg.buffer_id == datapath.ofproto.OFP_NO_BUFFER:
                 data = msg.data
@@ -480,15 +413,14 @@ class Controller(app_manager.RyuApp):
         """
         self.logger.debug(f"DEBUG: Entrando a _install_multicast_flows para grupo {multicast_group_addr}.")
 
-        # 1) Conseguir la fuente (DPID) para este grupo multicast
+        # Conseguir la fuente (DPID) para este grupo multicast
         source_dpid = self.multicast_sources.get(multicast_group_addr)
         if not source_dpid:
             self.logger.warning(f"No se encontró la fuente para el grupo multicast {multicast_group_addr}. No se pueden instalar flujos.")
             self.logger.debug(f"DEBUG: Saliendo de _install_multicast_flows (sin fuente).")
             return
 
-        # 2) Conseguir los switches miembros para este grupo desde la información IGMP
-        # member_switches es un dict {dpid_int: [lista_de_puertos_host_reales]}
+        # Conseguir los switches miembros para este grupo desde la información IGMP
         member_switches = self.multicast_group_members.get(multicast_group_addr, {})
         if not member_switches:
             self.logger.warning(f"No hay miembros para el grupo multicast {multicast_group_addr}. No hay flujos para instalar.")
@@ -496,21 +428,20 @@ class Controller(app_manager.RyuApp):
 
             if self._last_installed_tree.get(multicast_group_addr):
                  self.logger.info(f"No hay miembros para {multicast_group_addr}, pero había un árbol anterior. Limpiando flujos.")
-                 self._clear_flows_for_group(multicast_group_addr) # Necesitarás una función helper o mover lógica de _remove_multicast_flows
+                 self._clear_flows_for_group(multicast_group_addr) 
                  self._last_installed_tree.pop(multicast_group_addr, None)
             return
 
-        # 3) Pedir al backend Flask (dijkstra.py) el árbol multicast base
-        # Se envían los DPIDs de los switches que tienen miembros.
+        # Pedir al backend Flask el árbol multicast base
         self.logger.debug(f"DEBUG: Solicitando árbol multicast remoto para {multicast_group_addr} "
                           f"desde fuente {source_dpid} a miembros {list(member_switches.keys())}.")
         try:
             url = "http://192.168.18.151:5000/dijkstra/calculate_multicast_tree"
             payload = {
                 "source_dpid": source_dpid,
-                "member_dpids": list(member_switches.keys()) # Solo DPIDs de switches con miembros
+                "member_dpids": list(member_switches.keys()) 
             }
-            response = requests.post(url, json=payload, timeout=5) # Aumentado timeout
+            response = requests.post(url, json=payload, timeout=5)
             if response.status_code != 200:
                 self.logger.error(f"Error al obtener árbol multicast de dijkstra.py: {response.status_code} {response.text}")
                 self.logger.debug(f"DEBUG: Saliendo de _install_multicast_flows (respuesta no 200 de dijkstra).")
@@ -524,14 +455,14 @@ class Controller(app_manager.RyuApp):
 
         self.logger.debug(f"DEBUG: Árbol base recibido de dijkstra.py para {multicast_group_addr}: {dijkstra_tree_raw}")
 
-        # 4) Parsear el árbol de Dijkstra (convertir claves a int, puertos válidos)
+        # Parsear el árbol de Dijkstra 
         parsed_tree_from_dijkstra = {}
         for dpid_str, ports_list in dijkstra_tree_raw.items():
             try:
                 dpid_int = int(dpid_str)
                 # Filtrar puertos que sean int > 0
                 parsed_ports = [int(p) for p in ports_list if isinstance(p, int) and p > 0]
-                if parsed_ports: # Solo agregar si hay puertos válidos
+                if parsed_ports: 
                     parsed_tree_from_dijkstra[dpid_int] = parsed_ports
             except ValueError:
                 self.logger.warning(f"DPID inválido en el árbol recibido de dijkstra.py: {dpid_str}")
@@ -541,7 +472,7 @@ class Controller(app_manager.RyuApp):
 
         any_members_left = any(member_switches.values())
         if not parsed_tree_from_dijkstra and any_members_left:
-            self.logger.error(f"❌ Árbol de Dijkstra vacío para {multicast_group_addr} aunque hay miembros IGMP: {member_switches}")
+            self.logger.error(f" Árbol de Dijkstra vacío para {multicast_group_addr} aunque hay miembros IGMP: {member_switches}")
             return
 
         final_tree_to_install = {}
@@ -549,59 +480,43 @@ class Controller(app_manager.RyuApp):
         all_involved_dpids = set(parsed_tree_from_dijkstra.keys()).union(set(member_switches.keys()))
 
         for dpid_int in all_involved_dpids:
-            # Puertos de tránsito del árbol de Dijkstra (switch a switch o un puerto genérico a host si dijkstra lo añadió)
             dijkstra_ports_set = set(parsed_tree_from_dijkstra.get(dpid_int, []))
 
-            # Puertos de host reales en este DPID para este grupo multicast (de IGMP)
+            # Puertos de host reales en este DPID para este grupo multicast
             actual_member_ports_set = set(member_switches.get(dpid_int, []))
             
-            # Combinar ambos conjuntos de puertos.
-            # Si un switch es tanto de tránsito como hoja, tendrá ambos tipos de puertos.
             combined_ports = dijkstra_ports_set.union(actual_member_ports_set)
 
-            # Caso especial: si el switch fuente es también un switch miembro (el host está en el switch fuente)
-            # y Dijkstra no proporciona puertos de salida (porque es el inicio de todos los caminos),
-            # asegurarse de que los puertos de los miembros locales se incluyan.
             if dpid_int == source_dpid and not dijkstra_ports_set and actual_member_ports_set:
                 combined_ports = actual_member_ports_set
             
             if combined_ports: # Solo agregar si hay puertos resultantes
                 final_tree_to_install[dpid_int] = sorted(list(combined_ports))
-            # No es necesario un 'else' aquí, ya que si un dpid no tiene puertos combinados,
-            # simplemente no se incluirá en final_tree_to_install, lo que significa que no se instalarán flujos
-            # (o se eliminarán si existían previamente y ya no son necesarios).
             elif not combined_ports and dpid_int in member_switches:
                  self.logger.warning(f"Switch {dpid_int} es miembro del grupo {multicast_group_addr} pero no tiene puertos en el árbol final calculado. Esto podría ser normal si es el switch fuente y el único miembro, o un problema de ruta.")
 
 
         self.logger.debug(f"DEBUG: Árbol final construido para {multicast_group_addr} después de fusionar con datos IGMP: {final_tree_to_install}")
         
-        # Usar este árbol final y completo para la comparación y la instalación.
-        # Renombrar a 'current_tree_for_installation' para mayor claridad semántica.
         current_tree_for_installation = final_tree_to_install
-        # --- FIN DE LA LÓGICA DE FUSIÓN ---
 
-        # 5) Comparar con el último árbol instalado para este grupo
+        # Comparar con el último árbol instalado para este grupo
         last_installed_tree_for_group = self._last_installed_tree.get(multicast_group_addr, {})
         
         if last_installed_tree_for_group == current_tree_for_installation:
-            # Si ambos son iguales (incluso si ambos están vacíos), no hay cambios.
             self.logger.debug(f"DEBUG: El árbol multicast para {multicast_group_addr} no cambió. "
                               f"Se omite reinstalación de flujos. Actual: {current_tree_for_installation}, Anterior: {last_installed_tree_for_group}")
-            # Si el árbol actual está vacío y el anterior también, y no hay miembros, esto es correcto.
-            # Si el árbol actual está vacío PERO hay miembros, es un problema de cálculo del árbol.
+
             if not current_tree_for_installation and member_switches:
                  self.logger.error(f"ERROR CRÍTICO: No se pudo calcular un árbol para {multicast_group_addr} a pesar de tener miembros: {member_switches}. Fuente: {source_dpid}. Dijkstra tree: {parsed_tree_from_dijkstra}")
             return
 
-        # 6) Guardar el nuevo árbol (ahora completo y correcto) en la caché
+        # Guardar el nuevo árbol
         self.logger.info(f"Cambio detectado para {multicast_group_addr}. Anterior: {last_installed_tree_for_group}, Nuevo: {current_tree_for_installation}")
         self._last_installed_tree[multicast_group_addr] = current_tree_for_installation
 
-        # 7) Limpiar flujos viejos para este grupo EN TODOS LOS SWITCHES donde podrían haber estado.
-        # Usar los DPIDs del árbol anterior y del árbol actual para la limpieza.
+        # Limpiar flujos viejos para este grupo EN TODOS LOS SWITCHES donde podrían haber estado.
         dpids_potentially_with_old_flows = set(last_installed_tree_for_group.keys()).union(set(current_tree_for_installation.keys()))
-        # También considerar los switches que estaban en multicast_flow_installed_at pero ya no están en ningún árbol.
         dpids_potentially_with_old_flows.update(self.multicast_flow_installed_at.get(multicast_group_addr, set()))
 
         self.logger.debug(f"DEBUG: Limpiando flujos existentes para {multicast_group_addr} en DPIDs: {dpids_potentially_with_old_flows}")
@@ -610,14 +525,12 @@ class Controller(app_manager.RyuApp):
             if dpid_to_clear in self.datapaths:
                 datapath = self.datapaths[dpid_to_clear]
                 parser = datapath.ofproto_parser
-                # Match específico para el grupo multicast y UDP (común para streaming)
                 match = parser.OFPMatch(
                     eth_type=ether_types.ETH_TYPE_IP,
                     ipv4_dst=multicast_group_addr,
-                    ip_proto=inet.IPPROTO_UDP # Asumiendo UDP para multicast, ajustar si es necesario
+                    ip_proto=inet.IPPROTO_UDP 
                 )
-                self.remove_flow_by_match(datapath, match) # remove_flow_by_match ya loguea
-                # self.logger.info(f"Flujo multicast existente en dpid {dpid_to_clear} limpiado para {multicast_group_addr}")
+                self.remove_flow_by_match(datapath, match) 
             # Eliminar de multicast_flow_installed_at si ya no es parte del nuevo árbol
             if dpid_to_clear not in current_tree_for_installation:
                 self.multicast_flow_installed_at.get(multicast_group_addr, set()).discard(dpid_to_clear)
@@ -627,10 +540,10 @@ class Controller(app_manager.RyuApp):
             # Si el conjunto de flujos instalados para este grupo está vacío, eliminar la entrada del grupo.
             if not self.multicast_flow_installed_at.get(multicast_group_addr):
                 self.multicast_flow_installed_at.pop(multicast_group_addr, None)
-            self._last_installed_tree.pop(multicast_group_addr, None) # Eliminar también de la caché del último árbol
+            self._last_installed_tree.pop(multicast_group_addr, None) 
             return
 
-        # 8) Instalar flujos nuevos según current_tree_for_installation
+        # Instalar flujos nuevos según current_tree_for_installation
         self.logger.debug(f"DEBUG: Instalando nuevos flujos para {multicast_group_addr} con árbol: {current_tree_for_installation}")
         current_dpids_with_flow_for_group = set()
         for dpid, out_ports in current_tree_for_installation.items():
@@ -638,8 +551,7 @@ class Controller(app_manager.RyuApp):
                 self.logger.warning(f"Switch {dpid} no encontrado en self.datapaths. No se puede instalar flujo multicast para {multicast_group_addr}.")
                 continue
 
-            # out_ports ya debería ser una lista de enteros válidos y ordenados por la lógica de fusión
-            if not out_ports: # Si por alguna razón la lista de puertos está vacía para este dpid
+            if not out_ports: 
                 self.logger.warning(f"Saltando instalación de flujo en switch {dpid} para {multicast_group_addr} debido a lista de puertos de salida vacía.")
                 continue
 
@@ -651,12 +563,11 @@ class Controller(app_manager.RyuApp):
             match = parser.OFPMatch(
                 eth_type=ether_types.ETH_TYPE_IP,
                 ipv4_dst=multicast_group_addr,
-                ip_proto=inet.IPPROTO_UDP # Asumiendo UDP
+                ip_proto=inet.IPPROTO_UDP 
             )
 
-            # Usar timeouts razonables
             self.add_flow(datapath, priority=200, match=match, actions=actions,
-                          idle_timeout=300, hard_timeout=0) # Timeouts en segundos
+                          idle_timeout=300, hard_timeout=0) 
 
             current_dpids_with_flow_for_group.add(dpid)
             self.logger.info(f"[MULTICAST] Flujo instalado/actualizado en {dpid} para {multicast_group_addr} "
@@ -665,27 +576,18 @@ class Controller(app_manager.RyuApp):
         # Actualizar el registro de dónde se han instalado los flujos
         if current_dpids_with_flow_for_group:
             self.multicast_flow_installed_at[multicast_group_addr] = current_dpids_with_flow_for_group
-        else: # Si no se instalaron flujos (ej. árbol vacío y ya limpiado)
+        else: 
             self.multicast_flow_installed_at.pop(multicast_group_addr, None)
 
 
         self.logger.debug(f"DEBUG: Saliendo de _install_multicast_flows para grupo {multicast_group_addr}.")
 
 
-
-    
-        
-
-
     def _remove_multicast_flows(self, multicast_group_addr):
-        """
-        Re-evalúa y elimina flujos multicast si no quedan miembros para un grupo.
-        Esta versión verifica correctamente si quedan miembros en *algún* switch.
-        """
+
         self.logger.debug(f"DEBUG: Entrando a _remove_multicast_flows para grupo {multicast_group_addr}.")
         try:
             with self.topology_lock:
-                # 🚨 Corrección: evaluar todos los switches para ese grupo
                 miembros_por_switch = self.multicast_group_members.get(multicast_group_addr, {})
                 quedan_miembros = any(miembros_por_switch.values())
 
@@ -749,15 +651,7 @@ class Controller(app_manager.RyuApp):
     
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
-        """
-        Maneja el evento Packet-In, que ocurre cuando un switch envía un paquete al controlador.
-        Realiza:
-          - Aprendizaje de MAC (unicast)
-          - ARP proxy
-          - IGMP (suscripción a grupos multicast)
-          - Multicast IP (filtro para evitar logs reiterados)
-          - Unicast IP (cálculo de ruta via dijkstra.py / Flask)
-        """
+
         msg = ev.msg
         datapath = msg.datapath
         ofproto = datapath.ofproto
@@ -771,10 +665,8 @@ class Controller(app_manager.RyuApp):
         if not eth:
             return
 
-        # DEBUG: ver todos los PacketIn recibidos
         self.logger.debug(f"DEBUG: PacketIn recibido en switch={dpid} in_port={in_port} eth_type={eth.ethertype:04x}")
 
-        # DEBUG: listar protocolos en el paquete
         protocol_names = [p.protocol_name for p in pkt.protocols if hasattr(p, 'protocol_name')]
         self.logger.debug(f"Packet protocols: {protocol_names}")
 
@@ -791,9 +683,7 @@ class Controller(app_manager.RyuApp):
 
         self.logger.debug(f"Paquete entrante: switch={dpid} src={src_mac} dst={dst_mac} in_port={in_port} ethertype={eth.ethertype:04x}")
 
-        # --------------------------------------------
-        # 1) Aprendizaje de MAC unicast
-        # --------------------------------------------
+        # Aprendizaje de MAC unicast
         first_octet_src_int = int(src_mac.split(':')[0], 16)
         is_src_multicast = ((first_octet_src_int & 1) == 1)
         if not is_src_multicast:
@@ -801,9 +691,7 @@ class Controller(app_manager.RyuApp):
                 self.mac_to_port[dpid][src_mac] = in_port
                 self.logger.info(f"MAC aprendida: switch={dpid} mac={src_mac} port={in_port}")
 
-        # --------------------------------------------
-        # 2) Manejo de ARP proxy
-        # --------------------------------------------
+        # Manejo de ARP proxy
         if eth.ethertype == ether_types.ETH_TYPE_ARP:
             arp_pkt = pkt.get_protocol(arp.arp)
             if arp_pkt:
@@ -819,20 +707,13 @@ class Controller(app_manager.RyuApp):
                             return
                 # Si fuera ARP_REPLY, permitir que se procese como unicast normal
 
-        # --------------------------------------------
-        # 3) Manejo de IGMP (suscripción/desuscripción)
-        # --------------------------------------------
+        # Manejo de IGMP (suscripción/desuscripción)
         for protocol in pkt.protocols:
             if isinstance(protocol, igmp.igmp):
                 self.logger.info(f"Paquete IGMP recibido en switch {dpid}, puerto {in_port}: {protocol}")
-                # Lógica para actualizar self.multicast_sources y self.multicast_group_members
-                # según el tipo de mensaje IGMP (Join/Leave). Luego:
                 self._handle_igmp_packet(datapath, msg, dpid, in_port, protocol)
                 return
 
-        # --------------------------------------------
-        # 4) Multicast IP (224.0.0.0/4 o 239.0.0.0/8)
-        # --------------------------------------------
         first_octet_dst_int = int(dst_mac.split(':')[0], 16)
         is_dst_multicast = ((first_octet_dst_int & 1) == 1)
         if is_dst_multicast:
@@ -840,22 +721,17 @@ class Controller(app_manager.RyuApp):
             if _ipv4 and (_ipv4.dst.startswith('224.') or _ipv4.dst.startswith('239.')):
                 group_ip = _ipv4.dst
 
-                # 1) Si no hay ningún miembro suscrito a ese grupo, ignorar SIN LOG ni llamada
                 members = self.multicast_group_members.get(group_ip)
                 if not members:
-                    # No hay ningún cliente suscrito → descartamos el PacketIn.
                     return
 
-                # 2) Si este switch ya tiene instalado flujo para ese grupo, tampoco hacemos nada
                 if dpid in self.multicast_flow_installed_at.get(group_ip, set()):
                     return
 
-                # 3) Aquí ya sabemos que hay al menos un miembro Y este switch no tiene flujo instalado:
                 self.logger.info(f"Tráfico IP Multicast {group_ip} de {dpid} en {in_port} llegó al controlador. Re-evaluando e instalando flujos.")
                 self._handle_multicast_ip_traffic(datapath, msg, dpid, in_port, group_ip)
                 return
             else:
-                # Broadcast/multicast no IP → inundar
                 out_port = ofproto.OFPP_FLOOD
                 self.logger.info(f"Inundando paquete broadcast/multicast no IP en switch={dpid} dst={dst_mac}")
                 data = None
@@ -873,16 +749,13 @@ class Controller(app_manager.RyuApp):
                 return
 
 
-        # --------------------------------------------
-        # 5) Unicast IP
-        # --------------------------------------------
+        # Unicast IP
         _ipv4 = pkt.get_protocol(ipv4.ipv4)
         if _ipv4:
             self.logger.info(f"DEBUG: Paquete IP Unicast de {_ipv4.src} a {_ipv4.dst} en switch {dpid}. Protocolo IP: {_ipv4.proto}")
         else:
             self.logger.info(f"DEBUG: Paquete Unicast no IP src={src_mac} dst={dst_mac} en switch {dpid}")
 
-        # 5.1) Si destino unicast ya está aprendido localmente
         if dst_mac in self.mac_to_port[dpid]:
             out_port = self.mac_to_port[dpid][dst_mac]
             self.logger.info(f"Destino conocido en switch={dpid} dst={dst_mac} port={out_port}. Instalando flujo directo.")
@@ -892,7 +765,7 @@ class Controller(app_manager.RyuApp):
                 eth_dst=dst_mac
             )
             actions = [parser.OFPActionOutput(out_port)]
-            # Flujos permanentes
+            
             self.add_flow(datapath, priority=100, match=match, actions=actions,
                           buffer_id=msg.buffer_id, idle_timeout=60, hard_timeout=60)
 
@@ -910,7 +783,6 @@ class Controller(app_manager.RyuApp):
             self.logger.debug(f"Paquete enviado desde switch {dpid} puerto {out_port} (ruta directa).")
             return
 
-        # 5.2) Si destino unicast no está aprendido, pero lo conocemos vía host_to_switch_map
         if dst_mac in self.host_to_switch_map:
             dst_host_info = self.host_to_switch_map[dst_mac]
             dst_switch_dpid = dst_host_info['dpid']
@@ -918,7 +790,6 @@ class Controller(app_manager.RyuApp):
 
             self.logger.info(f"Host de destino {dst_mac} en switch {dst_switch_dpid} puerto {dst_switch_port_to_host}")
 
-            # Solicitar ruta ida (src→dst) al backend Flask (/dijkstra/calculate_path)
             try:
                 url = 'http://192.168.18.151:5000/dijkstra/calculate_path'
                 payload = {"src_mac": src_mac, "dst_mac": dst_mac}
@@ -1030,8 +901,6 @@ class Controller(app_manager.RyuApp):
                 self.logger.error(f"Fallo al enviar paquete inicial: puerto inválido ({initial_out_port})")
             return
 
-        # --------------------------------------------
-        # 6) Si el paquete no fue manejado en ninguna de las ramas anteriores, lo descartamos
-        # --------------------------------------------
+        # Si el paquete no fue manejado en ninguna de las ramas anteriores, lo descartamos
         self.logger.debug(f"Paquete no manejado: src={src_mac}, dst={dst_mac}, eth_type={eth.ethertype} en dpid={dpid}, in_port={in_port}. Descartando.")
         return

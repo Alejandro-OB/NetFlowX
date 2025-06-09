@@ -1,10 +1,9 @@
-// --- topology.js ---
 let map;                        // Mapa Leaflet
 let markers    = {};            // { id_switch: L.marker }   (marcadores de switches)
 let hostMarkers = {};           // { mac: L.marker }         (marcadores de hosts)
 let polylines  = [];            // Líneas que representan enlaces
 let selectedHosts = [];         // [{ mac, ip, name, id_switch }, ...] (máximo 2)
-let rutaPolylines = [];         // Líneas rojas que marcan la ruta calculada
+let rutaPolylines = [];         
 
 
 function colorPorAnchoBanda(ancho_banda) {
@@ -164,9 +163,9 @@ async function loadTopology() {
     window.hostData = data.hosts;
 
     function getOffsetPosition(baseLat, baseLon, index, total) {
-      const spacing = 1.4; // distancia horizontal entre hosts
+      const spacing = 1.4; 
       const offsetLon = baseLon + (index - (total - 1) / 2) * spacing;
-      const offsetLat = baseLat - .93; // un poco más abajo del switch
+      const offsetLat = baseLat - .93; 
       return [offsetLat, offsetLon];
     }
 
@@ -210,7 +209,6 @@ async function loadTopology() {
           togglePingButton();
         });
 
-        // Línea de conexión del host al switch
         const hostLine = L.polyline([
           [sw.latitud, sw.longitud],
           [lat, lon]
@@ -226,7 +224,7 @@ async function loadTopology() {
 
     if (allLatLngs.length > 0) {
       const bounds = L.latLngBounds(allLatLngs);
-      map.fitBounds(bounds.pad(0.1)); // Disminuido para mejor visibilidad
+      map.fitBounds(bounds.pad(0.1)); 
     }
 
     togglePingButton();
@@ -274,7 +272,6 @@ function mostrarPingStream(hostOrigenObj, hostDestinoObj) {
   output.textContent += `Conectando SSE para ping...\n`;
 
   obtenerYMostrarRuta(origenMac, destinoMac, origenName, destinoName);
-  // SSE: ping entre hosts en Mininet
   const url = `${MININET_AGENT_URL}/mininet/ping_between_hosts_stream?origen=${encodeURIComponent(origenName)}&destino=${encodeURIComponent(destinoIp)}`;
   const eventSource = new EventSource(url);
 
@@ -295,7 +292,6 @@ function mostrarPingStream(hostOrigenObj, hostDestinoObj) {
   eventSource.onerror = () => {
     output.textContent += '\n[Fin del ping o error de conexión]\n';
     eventSource.close();
-    //obtenerYMostrarRuta(origenMac, destinoMac, origenName, destinoName);
   };
 }
 
@@ -309,7 +305,6 @@ async function obtenerYMostrarRuta(origenMac, destinoMac, origenHostName, destin
   //output.textContent += '\nCalculando ruta con Dijkstra...\n';
 
   try {
-    // 1) POST a /dijkstra/calculate_path para obtener la ruta
     const pathRes = await fetch(`${API_BASE_URL}/dijkstra/calculate_path`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -326,10 +321,7 @@ async function obtenerYMostrarRuta(origenMac, destinoMac, origenHostName, destin
     const pathData = await pathRes.json();
     const pathArr = pathData.path; // [{ dpid: <int>, out_port: <int>, in_port: <int|null> }, ...]
     
-    //output.textContent += `Ruta recibida: ${JSON.stringify(pathArr)}\n`;
-    //console.log("Ruta calculada (pathArr):", pathArr);
 
-    // 2) Obtener topología actual (solo para coordenadas)
     const topoRes = await fetch(`${API_BASE_URL}/topology/get`);
     if (!topoRes.ok) {
       throw new Error(`Error al obtener topología: ${topoRes.status}`);
@@ -337,10 +329,10 @@ async function obtenerYMostrarRuta(origenMac, destinoMac, origenHostName, destin
     const topoData = await topoRes.json();
     const allSwitchesData = Array.isArray(topoData.switches) ? topoData.switches : [];
 
-    // 4) Dibujar ruta en el mapa
+    //  Dibujar ruta en el mapa
     dibujarRutaEnMapa(pathArr, allSwitchesData);
 
-    // 5) Guardar la ruta en la base de datos
+    // Guardar la ruta en la base de datos
     await guardarRutaEnBaseDeDatos(pathArr, origenHostName, destinoHostName);
 
   } catch (err) {
@@ -354,7 +346,6 @@ async function guardarRutaEnBaseDeDatos(pathArr, origenName, destinoName) {
   const output = document.getElementById('ping-output');
   output.textContent += '\nGuardando ruta en la base de datos...\n';
   console.log("Guardando ruta:", pathArr, "de", origenName, "a", destinoName);
-  // Crear la cadena con los dpids de la ruta (por ejemplo, 's1-s2-s3-s4')
   const dpidRoute = pathArr.map(item => item.dpid).join('-');
 
   try {
@@ -363,9 +354,9 @@ async function guardarRutaEnBaseDeDatos(pathArr, origenName, destinoName) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        host_origen: origenName,  // Enviar el nombre del host de origen
-        host_destino: destinoName, // Enviar el nombre del host de destino
-        ruta: dpidRoute          // Enviar la ruta en formato 's1-s2-s3...'
+        host_origen: origenName,  
+        host_destino: destinoName, 
+        ruta: dpidRoute          
       })
     });
 
@@ -386,7 +377,6 @@ async function guardarRutaEnBaseDeDatos(pathArr, origenName, destinoName) {
 //  Dibuja la ruta en el mapa usando id_switch directo
 // ==================================================
 function dibujarRutaEnMapa(ruta, allSwitchesData) {
-  // Eliminar trazados de ruta previos
   rutaPolylines.forEach(line => line.remove());
   rutaPolylines = [];
 
@@ -437,7 +427,6 @@ function dibujarRutaEnMapa(ruta, allSwitchesData) {
 document.addEventListener('DOMContentLoaded', () => {
   loadTopology();
 
-  // Asociar el botón “Ping” (ya no hay checkboxes en HTML)
   const pingBtn = document.getElementById('btn-ping');
   if (pingBtn) {
     pingBtn.addEventListener('click', iniciarPing);

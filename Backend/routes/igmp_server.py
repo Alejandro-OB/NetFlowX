@@ -4,7 +4,6 @@ import logging
 
 igmp_bp = Blueprint('igmp', __name__)
 logger = logging.getLogger(__name__)
-# Estado en memoria: { grupo_multicast: { dpid: [puertos] } }
 group_membership = {}
 
 @igmp_bp.route("/process", methods=["POST"])
@@ -19,63 +18,58 @@ def process_igmp():
     install_flows = set()
     remove_flows = set()
 
-    logger.info(f"📥 IGMP recibido: switch={dpid}, puerto={in_port}, tipo={msgtype}")
+    logger.info(f"IGMP recibido: switch={dpid}, puerto={in_port}, tipo={msgtype}")
 
-    if msgtype == 34:  # IGMPv3
+    if msgtype == 34:  
         for record in records:
             group_ip = record.get("address")
             record_type = record.get("type")
             sources = record.get("sources", [])
 
-            if record_type in [1, 3]:  # Join
+            if record_type in [1, 3]:  
                 if not sources:
-                    logger.info(f"🚫 Ignorado IGMPv3 Join vacío para {group_ip}")
+                    logger.info(f" Ignorado IGMPv3 Join vacío para {group_ip}")
                     continue
                 group_membership.setdefault(group_ip, {}).setdefault(dpid, [])
                 if in_port not in group_membership[group_ip][dpid]:
                     group_membership[group_ip][dpid].append(in_port)
-                    logger.info(f"✅ [JOIN-v3] {group_ip} -> switch {dpid}, port {in_port}")
+                    logger.info(f" [JOIN-v3] {group_ip} -> switch {dpid}, port {in_port}")
                     install_flows.add(group_ip)
 
-            elif record_type in [2, 4]:  # Leave
+            elif record_type in [2, 4]:  
                 if group_ip in group_membership and dpid in group_membership[group_ip]:
                     if in_port in group_membership[group_ip][dpid]:
                         group_membership[group_ip][dpid].remove(in_port)
-                        logger.info(f"❌ [LEAVE-v3] {group_ip} <- switch {dpid}, port {in_port}")
+                        logger.info(f" [LEAVE-v3] {group_ip} <- switch {dpid}, port {in_port}")
                         if not group_membership[group_ip][dpid]:
                             del group_membership[group_ip][dpid]
                         if not group_membership[group_ip]:
                             del group_membership[group_ip]
                             remove_flows.add(group_ip)
 
-    elif msgtype == 22:  # IGMPv2 Membership Report (Join)
+    elif msgtype == 22:  
         group_ip = address
         group_membership.setdefault(group_ip, {}).setdefault(dpid, [])
-        # Clonar la lista actual para comparación
         old_ports = list(group_membership[group_ip][dpid])
 
-        # Agregar el puerto si es nuevo
         if in_port not in group_membership[group_ip][dpid]:
             group_membership[group_ip][dpid].append(in_port)
-            logger.info(f"✅ [JOIN-v2] {group_ip} -> switch {dpid}, port {in_port}")
+            logger.info(f" [JOIN-v2] {group_ip} -> switch {dpid}, port {in_port}")
 
-        # Comparar listas ordenadas: si hay diferencia, forzar reinstalación
         if sorted(old_ports) != sorted(group_membership[group_ip][dpid]):
             install_flows.add(group_ip)
 
 
-    elif msgtype == 23:  # IGMPv2 Leave
+    elif msgtype == 23:  
         group_ip = address
         if group_ip in group_membership and dpid in group_membership[group_ip]:
             if in_port in group_membership[group_ip][dpid]:
                 group_membership[group_ip][dpid].remove(in_port)
-                logger.info(f"❌ [LEAVE-v2] {group_ip} <- switch {dpid}, port {in_port}")
+                logger.info(f" [LEAVE-v2] {group_ip} <- switch {dpid}, port {in_port}")
 
-            # ✅ Solo eliminar dpid si su lista quedó vacía
             if not group_membership[group_ip][dpid]:
                 del group_membership[group_ip][dpid]
 
-            # ✅ Solo verificar y eliminar el grupo si todavía existe
             if group_ip in group_membership and not any(group_membership[group_ip].values()):
                 del group_membership[group_ip]
                 remove_flows.add(group_ip)

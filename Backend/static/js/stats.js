@@ -10,7 +10,7 @@ async function cargarEstadisticas() {
 
     // Gráfico de barras - Clientes por servidor
     const grafico = document.getElementById("grafico-clientes");
-    grafico.innerHTML = ""; // Limpiar gráfico existente
+    grafico.innerHTML = ""; 
 
     // Preparar los datos para el gráfico
     const labels = stats.clientes_por_servidor.map(item => item.servidor);
@@ -18,7 +18,7 @@ async function cargarEstadisticas() {
 
     // Verificar si ya existe un gráfico y destruirlo antes de crear uno nuevo
     if (window.myChart) {
-      window.myChart.destroy(); // Destruir el gráfico anterior
+      window.myChart.destroy(); 
     }
 
     // Crear el gráfico
@@ -59,7 +59,7 @@ async function cargarEstadisticas() {
       }
     });
 
-    // Tabla carga vs peso (mantener la tabla como estaba)
+    // Tabla carga vs peso 
     const tablaCarga = document.getElementById("tabla-carga");
     tablaCarga.innerHTML = "";
     stats.carga_vs_peso.forEach(item => {
@@ -93,7 +93,7 @@ async function cargarEstadisticasConRutas() {
 
     // Tabla para mostrar las estadísticas combinadas
     const tablaEstadisticas = document.getElementById("tabla-estadisticas");
-    tablaEstadisticas.innerHTML = "";  // Limpiar la tabla antes de agregar nuevos datos
+    tablaEstadisticas.innerHTML = "";  
 
     // Encabezados de la tabla
     tablaEstadisticas.innerHTML = `
@@ -191,11 +191,7 @@ async function cargarComparacionAlgoritmos() {
   }
 }
 
-// Llamar a esta función para cargar y mostrar el gráfico
 document.addEventListener("DOMContentLoaded", cargarComparacionAlgoritmos);
-
-
-// Llamar a esta función para actualizar la tabla
 document.getElementById("tabla-estadisticas").innerHTML = "<p>Cargando estadísticas...</p>";
 cargarEstadisticasConRutas();
 

@@ -10,17 +10,14 @@ from config import Config
 dijkstra_bp = Blueprint('dijkstra', __name__)
 logger = logging.getLogger(__name__)
 
-# -------------------------------------------------------------------
-# Diccionarios de topología (llenados en load_topology)
 network_graph      = collections.defaultdict(dict)
 switches_by_dpid   = {}   # { dpid_int: switch_nombre }
 host_to_switch_map = {}   # { mac: { 'dpid': int, 'port': int, 'ip': str, 'name': str } }
 
-# Mapeos auxiliares
 id_map           = {}  # { id_switch: dpid_int }
 id_to_name       = {}  # { id_switch: switch_nombre }
 hosts_id_to_name = {}  # { id_host: host_nombre }
-# -------------------------------------------------------------------
+
 
 def _get_db_connection():
     try:
@@ -31,9 +28,7 @@ def _get_db_connection():
 
 
 def load_topology():
-    """
-    Carga switches, hosts, puertos y enlaces en memory_graph, switches_by_dpid y host_to_switch_map.
-    """
+
     global network_graph, switches_by_dpid, host_to_switch_map
     global id_map, id_to_name, hosts_id_to_name
 
@@ -44,7 +39,7 @@ def load_topology():
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # 1) Cargar switches
+        #  Cargar switches
         cur.execute("SELECT id_switch, nombre FROM switches")
         id_map.clear()
         id_to_name.clear()
@@ -60,14 +55,14 @@ def load_topology():
             switches_by_dpid[dpid_int]   = row['nombre']
             network_graph[dpid_int]      = {}
 
-        # 2) Cargar hosts (para nombre y mapeo MAC→switch+puerto)
+        #  Cargar hosts 
         cur.execute("SELECT id_host, nombre, switch_asociado, ipv4 AS ip, mac FROM hosts")
         hosts_id_to_name.clear()
         temp_host_rows = cur.fetchall()
         for row in temp_host_rows:
             hosts_id_to_name[row['id_host']] = row['nombre']
 
-        # 3) Cargar puertos (usando las columnas FK)
+        #  Cargar puertos 
         cur.execute("""
             SELECT
               id_origen_switch,
@@ -99,7 +94,7 @@ def load_topology():
                     row['puerto_destino']
                 )
 
-        # 4) Cargar enlaces en network_graph
+        # Cargar enlaces en network_graph
         cur.execute("SELECT id_origen, id_destino, ancho_banda FROM enlaces")
         for row in cur.fetchall():
             id1   = row['id_origen']
@@ -150,7 +145,7 @@ def load_topology():
                 'port_in_neighbor': pi12
             }
 
-        # 5) Construir host_to_switch_map
+        # Construir host_to_switch_map
         host_to_switch_map.clear()
         for row in temp_host_rows:
             host_name   = row['nombre']
@@ -183,10 +178,7 @@ def load_topology():
 
 
 def calculate_dijkstra_path(start_dpid, end_dpid):
-    """
-    Dijkstra minimizando la suma de (1/ancho_banda) en cada enlace.
-    Devuelve una lista de tuplas: [(dpid0, None, None), (dpid1, port_out, port_in), ...].
-    """
+
     distances = {node: float('inf') for node in network_graph}
     distances[start_dpid] = 0
     heap = [(0, start_dpid, [(start_dpid, None, None)])]
@@ -216,10 +208,7 @@ def calculate_dijkstra_path(start_dpid, end_dpid):
 
 
 def calculate_shortest_path(start_dpid, end_dpid):
-    """
-    BFS puro: encuentra ruta con menor número de saltos.
-    Devuelve lista de tuplas [(dpid0, None, None), (dpid1, port_out, port_in), ...].
-    """
+
     visited = {start_dpid}
     queue = collections.deque()
     queue.append([(start_dpid, None, None)])
@@ -245,15 +234,7 @@ def calculate_shortest_path(start_dpid, end_dpid):
 
 @dijkstra_bp.route('/calculate_path', methods=['POST'])
 def calculate_path():
-    """
-    Espera JSON:
-      { "src_mac": "AA:BB:CC:DD:EE:FF", "dst_mac": "11:22:33:44:55:66" }
-    Lee 'algoritmo_enrutamiento' de la tabla configuracion:
-      - "dijkstra"       → calculate_dijkstra_path
-      - "shortest_path"  → calculate_shortest_path
-    Reconstruye la ruta en la misma estructura que el código original:
-      [ { "dpid":..., "out_port":..., "in_port":... }, ... ]
-    """
+
     data = request.get_json(force=True)
     src_mac = data.get('src_mac')
     dst_mac = data.get('dst_mac')
@@ -268,7 +249,7 @@ def calculate_path():
     dst_dpid = dst_info['dpid']
     dst_port = dst_info['port']
 
-    # 1) Leer algoritmo de la tabla 'configuracion'
+    # Leer algoritmo de la tabla 'configuracion'
     algoritmo = 'dijkstra'
     conn = _get_db_connection()
     if conn:
@@ -294,8 +275,7 @@ def calculate_path():
             print(f"[ERROR] Error al leer configuracion: {e}")
         finally:
             conn.close()
-    #print(f"Usando algoritmo de enrutamiento: {algoritmo}")
-    # 2) Calcular ruta según algoritmo
+    # Calcular ruta según algoritmo
     if algoritmo == 'shortest_path':
         raw_path = calculate_shortest_path(src_dpid, dst_dpid)
     else:
@@ -304,9 +284,7 @@ def calculate_path():
     if raw_path is None:
         return jsonify({"error": "No se encontró camino entre los nodos."}), 404
 
-    # 3) Reconstruir en la misma estructura original
     formatted_path = []
-    # raw_path = [(dpid0,None,None), (dpid1, port_out, port_in), ...]
     for i in range(len(raw_path)):
         dpid, out_p, in_p = raw_path[i]
         entry = {"dpid": dpid}
@@ -315,15 +293,15 @@ def calculate_path():
             # Primer salto: no hay in_port
             entry["in_port"] = None
             if len(raw_path) > 1:
-                # Puerto de salida es port_out del primer enlace
+                # Puerto de salida hacia el siguiente switch
                 next_dpid = raw_path[i+1][0]
                 link = network_graph.get(dpid, {}).get(next_dpid)
                 entry["out_port"] = link["port_out"] if link else -1
             else:
-                # Si start == end, salta directo al host
+                
                 entry["out_port"] = dst_port
         else:
-            # Para i > 0, in_port viene de raw_path[i][2]
+            
             entry["in_port"] = in_p if in_p is not None else -1
 
             if i < len(raw_path) - 1:
@@ -342,10 +320,7 @@ def calculate_path():
 
 @dijkstra_bp.route('/calculate_multicast_tree', methods=['POST'])
 def calculate_multicast_tree():
-    """
-    Calcula el árbol multicast a partir de un switch fuente hacia múltiples switches destino.
-    Si algún enlace o puerto requerido no existe, se devuelve un error y NO se devuelve el árbol incompleto.
-    """
+
     data = request.get_json(force=True)
     source_dpid = data.get('source_dpid')
     member_dpids = data.get('member_dpids')
@@ -408,7 +383,6 @@ def save_route():
     host_origen = data.get('host_origen')
     host_destino = data.get('host_destino')
     ruta = data.get('ruta')
-    #print(f"Datos recibidos: {data}")
 
     algoritmo = 'dijkstra'
     conn = _get_db_connection()
@@ -439,8 +413,7 @@ def save_route():
         return jsonify({"error": "Faltan parámetros: host_origen, host_destino, ruta"}), 400
 
     try:
-        # Verificar que los valores de host_origen y host_destino sean correctos
-        logger.info(f"Guardando ruta entre {host_origen} y {host_destino}")
+
 
         # Obtener el ID de los hosts en la base de datos por nombre
         conn = _get_db_connection()
